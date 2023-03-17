@@ -1,0 +1,8 @@
+{
+  "intersect_ds.ordered_vcf_shards_list": "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_input/intersect/vcf_file_list.txt",
+  "intersect_ds.ordered_sample_names": "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_input/intersect/sample_names_list.txt",
+  "intersect_ds.background_bed" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_input/intersect/test.bed",
+  "intersect_ds.svpoplib" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_input/intersect/svpoplib.tgz",
+  "intersect_ds.intersect_script" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_input/intersect/intersect.py"
+}
+
