@@ -18,7 +18,6 @@ workflow intersect_pav {
         background_bed: "Bed file to intersect the background with"
         intersect_script: "Script to run the intersects"
         ordered_sample_names: "Sample names associated with VCFs"
-        svpoplib: "SVPOP Library"
     }
 
     Array[File] input_vcfs = read_lines(ordered_vcf_shards_list)
@@ -34,10 +33,8 @@ workflow intersect_pav {
             input:
                 bed = ProcessPavVcf.bed,
                 sample = vcf_shard_pair.right,
-                threads = 4,
                 intersect_py = intersect_script,
                 background = background_bed,
-                svpoplib_tgz = svpoplib,
         }
 
     }
@@ -97,8 +94,6 @@ task IntersectWithBackground {
         File bed
         File background
         File intersect_py
-        File svpoplib_tgz
-        String threads
         String sample
 
         RuntimeAttr? runtime_attr_override 
@@ -106,7 +101,6 @@ task IntersectWithBackground {
     
     command <<<
         set -e
-        tar zxvf ~{svpoplib_tgz}
         python ~{intersect_py} -a ~{bed} -b ~{background} -o ~{sample + "_bg_int.bed"} -t ~{threads}
     >>>
 
@@ -118,7 +112,7 @@ task IntersectWithBackground {
 
   #########################
   RuntimeAttr default_attr = object {
-      cpu_cores:          threads,
+      cpu_cores:          4,
       mem_gb:             8,
       disk_gb:            10,
       boot_disk_gb:       10,
