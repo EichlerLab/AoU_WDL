@@ -34,7 +34,7 @@ workflow intersect_pav {
             input:
                 bed = ProcessPavVcf.bed,
                 sample = vcf_shard_pair.right,
-                threads = "4",
+                threads = 4,
                 intersect_py = intersect_script,
                 background = background_bed,
                 svpoplib_tgz = svpoplib,
@@ -100,6 +100,8 @@ task IntersectWithBackground {
         File svpoplib_tgz
         String threads
         String sample
+
+        RuntimeAttr? runtime_attr_override 
     }
     
     command <<<
@@ -108,15 +110,31 @@ task IntersectWithBackground {
         python ~{intersect_py} -a ~{bed} -b ~{background} -o ~{sample + "_bg_int.bed"} -t ~{threads}
     >>>
 
-    runtime {
-        memory: "8 GiB"
-        cpu: threads
-        disks: "local-disk 100 HDD"
-        docker: "us.gcr.io/broad-dsp-gcr-public/terra-jupyter-aou:2.1.17"
-    }
-
     output {
         File int_bed = "~{sample}_bg_int.bed"
-    }    
+    } 
+
+
+
+  #########################
+  RuntimeAttr default_attr = object {
+      cpu_cores:          threads,
+      mem_gb:             8,
+      disk_gb:            10,
+      boot_disk_gb:       10,
+      preemptible_tries:  2,
+      max_retries:        1,
+      docker:             "wharvey31/svpop:0.1"
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  runtime {
+      cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+      memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+      disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+      bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+      preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+      maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+      docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+  }
 
 }
