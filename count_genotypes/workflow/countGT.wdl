@@ -3,33 +3,38 @@ version 1.0
 
 workflow intersect_pav {
     input {
-      String sample
-      File pav_tab
-      File pbsv_tab
-      File sniffles_tab
-      File pav_bg
-      File pav_pbsv
-      File pav_sniffles
-      File pbsv_bg
-      File pbsv_sniffles
-      File sniffles_bg
-    }
-    meta {
-        workflow_description: "Creates callerset for a single sample"
+      File ordered_vcf_shards_list
+      File ordered_sample_names
+      File background_bed
+      File intersect_script
+      File windows_file
     }
 
+    meta {
+        workflow_description: "Counts Haplotype Presence over "
+    }
+    parameter_meta {
+        ordered_vcf_shards_list: "List of VCFs to process"
+        background_bed: "Bed file to intersect the background with"
+        intersect_script: "Script to run the intersects"
+        ordered_sample_names: "Sample names associated with VCFs"
+    }
+
+    Array[File] input_vcfs = read_lines(ordered_vcf_shards_list)
+    Array[File] input_sample_names = read_lines(ordered_sample_names)
+    
     scatter (vcf_shard_pair in zip(input_vcfs, input_sample_names)) {
-        call ProcessPavVcf {
+        call intersectWindows {
             input:
                 vcfIn = vcf_shard_pair.left,
                 sample = vcf_shard_pair.right,
+                windows_bed = windows_file,
         }
-        call IntersectWithBackground {
+        call countGenotypes {
             input:
-                bed = ProcessPavVcf.bed,
+                bed = intersectWindows.bed,
                 sample = vcf_shard_pair.right,
-                intersect_py = intersect_script,
-                background = background_bed,
+                process_script = intersect_script,
         }
 
     }
@@ -44,14 +49,14 @@ task ProcessPavVcf {
   input {
     File vcfIn
     String sample
+    File windows_bed
 
     RuntimeAttr? runtime_attr_override
   }
 
   command <<<
     set -e
-    echo -e "#CHROM\tPOS\tEND\tREF\tALT\tGT\tID\tSVTYPE" > ~{sample + "_PAV.bed"}
-    bcftools query -f "%CHROM\t%POS\t%END\t%REF\t%ALT\t[%GT]\t%INFO/ID\t%INFO/SVTYPE\n" ~{vcfIn} | grep -v SNV >> ~{sample + "_PAV.bed"}
+    bedtools intersect -a ~{windows_bed} -b ~{vcfIn} -wa -wb > ~{bed}
   >>>
 
 
@@ -125,9 +130,7 @@ task IntersectWithBackground {
       maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
       docker:                 select_first([runtime_attr.docker,            default_attr.docker])
   }
-
 }
-
 
 struct RuntimeAttr {
     Float? mem_gb

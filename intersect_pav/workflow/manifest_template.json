@@ -1,0 +1,14 @@
+{
+"sample" : "{sample}",
+"pav_tab" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/bed/pav/{sample}_PAV.bed",
+"pbsv_tab" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/bed/pbsv/{sample}_PBSV_SV.bed",
+"sniffles_tab" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/bed/sniffles/{sample}_sniffles_sv.bed",
+"pav_bg" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/intersect/pav/background/{sample}_bg_int.bed",
+"pav_pbsv" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/intersect/pav/pbsv/{sample}_pav_pbsv_int.bed",
+"pav_sniffles" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/intersect/pav/sniffles/{sample}_pav_sniffles_int.bed",
+"pbsv_bg" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/intersect/pbsv/background/{sample}_pbsv_bg_int.bed",
+"pbsv_sniffles" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/intersect/pbsv/sniffles/{sample}_pbsv_sniffles_int.bed",
+"sniffles_bg" : "gs://fc-secure-924d0574-03d1-4082-939e-fc5b86ea37b5/cromwell_output/intersect/sniffles/background/{sample}_sniffles_bg_int.bed",
+}
+
+
