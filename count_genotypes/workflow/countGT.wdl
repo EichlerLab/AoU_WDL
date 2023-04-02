@@ -1,41 +1,36 @@
 version 1.0
 
 
-workflow intersect_pav {
+workflow count_gt {
     input {
-      File ordered_vcf_shards_list
-      File ordered_sample_names
-      File background_bed
-      File intersect_script
+      File snv_vcf
       File windows_file
+      File process_script
+      String sample
     }
 
     meta {
-        workflow_description: "Counts Haplotype Presence over "
+        workflow_description: "Counts Haplotype Presence over 1kb windows"
     }
-    parameter_meta {
-        ordered_vcf_shards_list: "List of VCFs to process"
-        background_bed: "Bed file to intersect the background with"
-        intersect_script: "Script to run the intersects"
-        ordered_sample_names: "Sample names associated with VCFs"
-    }
+#    parameter_meta {
+#        ordered_vcf_shards_list: "List of VCFs to process"
+#        background_bed: "Bed file to intersect the background with"
+#        intersect_script: "Script to run the intersects"
+#        ordered_sample_names: "Sample names associated with VCFs"
+#    }
 
-    Array[File] input_vcfs = read_lines(ordered_vcf_shards_list)
-    Array[File] input_sample_names = read_lines(ordered_sample_names)
-    
-    scatter (vcf_shard_pair in zip(input_vcfs, input_sample_names)) {
-        call intersectWindows {
-            input:
-                vcfIn = vcf_shard_pair.left,
-                sample = vcf_shard_pair.right,
-                windows_bed = windows_file,
+    call intersectWindows {
+        input:
+            vcfIn = snv_vcf,
+            sample = sample,
+            windows_bed = windows_file,
         }
-        call countGenotypes {
-            input:
-                bed = intersectWindows.bed,
-                sample = vcf_shard_pair.right,
-                process_script = intersect_script,
-        }
+    call countGenotypes {
+        input:
+            bed = intersectWindows.bed,
+            sample = sample,
+            process_script = process_script,
+    }
 
     }
     output {
@@ -45,7 +40,7 @@ workflow intersect_pav {
 }
 
  
-task ProcessPavVcf {
+task bedtoolsIntVCF {
   input {
     File vcfIn
     String sample
@@ -56,12 +51,12 @@ task ProcessPavVcf {
 
   command <<<
     set -e
-    bedtools intersect -a ~{windows_bed} -b ~{vcfIn} -wa -wb > ~{bed}
+    bedtools intersect -a ~{windows_bed} -b ~{vcfIn} -wa -wb > ~{sample}_GT.bed
   >>>
 
 
   output {
-    File bed = "~{sample}_PAV.bed"
+    File bed = "~{sample}_GT.bed"
   }
 
   #########################

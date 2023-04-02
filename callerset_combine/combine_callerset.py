@@ -1,3 +1,6 @@
+#!/bin/env python
+
+
 import pandas as pd
 import argparse
 
@@ -16,19 +19,19 @@ parser.add_argument("--output", type=str, required=True)
 
 args = parser.parse_args()
 
-df_pav = pd.read_csv(args.pav_tab, sep='\t')
+df_pav = pd.read_csv(args.pav_tab, sep='\\t')
 df_pav['SVLEN'] = df_pav['ID'].str.split('-', expand=True)[3].astype(float).astype(int)
 df_pav = df_pav.loc[df_pav['SVLEN'] >= 50]
-df_sniffles = pd.read_csv(args.sniffles_tab, sep='\t')
-df_pbsv = pd.read_csv(args.pbsv_tab, sep='\t')
-int_pav_bg = pd.read_csv(args.pav_bg, sep='\t')
+df_sniffles = pd.read_csv(args.sniffles_tab, sep='\\t')
+df_pbsv = pd.read_csv(args.pbsv_tab, sep='\\t')
+int_pav_bg = pd.read_csv(args.pav_bg, sep='\\t')
 int_pav_bg = int_pav_bg.loc[int_pav_bg['MERGE_SAMPLES'] == 'A,B']
-int_pav_pbsv = pd.read_csv(args.pav_pbsv, sep='\t')
-int_pav_sniffles = pd.read_csv(args.pav_sniffles, sep='\t')
-int_pbsv_bg = pd.read_csv(args.pbsv_bg, sep='\t')
+int_pav_pbsv = pd.read_csv(args.pav_pbsv, sep='\\t')
+int_pav_sniffles = pd.read_csv(args.pav_sniffles, sep='\\t')
+int_pbsv_bg = pd.read_csv(args.pbsv_bg, sep='\\t')
 int_pbsv_bg = int_pbsv_bg.loc[int_pbsv_bg['MERGE_SAMPLES'] == 'A,B']
-int_pbsv_sniffles = pd.read_csv(args.pbsv_sniffles, sep='\t')
-int_sniffles_bg = pd.read_csv(args.sniffles_bg, sep='\t')
+int_pbsv_sniffles = pd.read_csv(args.pbsv_sniffles, sep='\\t')
+int_sniffles_bg = pd.read_csv(args.sniffles_bg, sep='\\t')
 int_sniffles_bg = int_sniffles_bg.loc[int_sniffles_bg['MERGE_SAMPLES'] == 'A,B']
 
 df_pav['ID_PAV'] = df_pav['ID']
@@ -79,6 +82,4 @@ out_df['SEEN'] = out_df.apply(lambda row : 'HGSVC_HPRC' if True in [row['PAV_BG'
 
 out_df['CALLERSET_LIST'] = out_df.apply(lambda row: ','.join([x for x in ['PAV', 'PBSV', 'SNIFFLES'] if row[x] == True]), axis=1)
 
-out_df.to_csv(args.output, sep='\t', index=False)
-
-
+out_df.to_csv(args.output, sep='\\t', index=False)
