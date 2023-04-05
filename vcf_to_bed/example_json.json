@@ -1,0 +1,9 @@
+{
+    "vcf_to_bed.ordered_sniffles_vcf_shards_list": "{bucket}/cromwell_input/vcf_to_bed/sniffles_vcf_file_list.txt",
+    "vcf_to_bed.ordered_sample_names": "{bucket}/cromwell_input/vcf_to_bed/sample_names_list.txt",
+    "vcf_to_bed.sniffles_format_script": "{bucket}/cromwell_input/vcf_to_bed/sniffles_filter_svs_bed.py",
+    "vcf_to_bed.filter_indel_script": "{bucket}/cromwell_input/vcf_to_bed/pbsv_filter_sv_indels_bed.py",
+    "vcf_to_bed.filter_inv_dup_script": "{bucket}/cromwell_input/vcf_to_bed/pbsv_filter_sv_invdup_bed.py",
+    "vcf_to_bed.combine_pbsv_script": "{bucket}/cromwell_input/vcf_to_bed/pbsv_combine_beds.py",
+    "vcf_to_bed.ordered_pbsv_vcf_shards_list": "{bucket}/cromwell_input/vcf_to_bed/pbsv_vcf_file_list.txt"
+}
