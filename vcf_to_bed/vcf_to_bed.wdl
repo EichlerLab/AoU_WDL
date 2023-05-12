@@ -333,7 +333,7 @@ task CombineSVs {
 task ProcessPAVVcf {
     input {
         File pavvcfIn
-        File sample
+        String sample
 
         RuntimeAttr? runtime_attr_override
     }
