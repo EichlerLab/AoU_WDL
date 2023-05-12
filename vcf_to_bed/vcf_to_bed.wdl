@@ -36,7 +36,6 @@ workflow vcf_to_bed {
             input:
                 snifflesbedIn = ProcessSnifflesVcf.bed,
                 filter_sniffles_sv_py = sniffles_format_script,
-                svpoplib_tgz = svpoplib,
                 sample = vcf_shard_pair_sniff.right,
         }
         
@@ -52,14 +51,12 @@ workflow vcf_to_bed {
                 pbsvbedIn = ProcessPBSVVcf.bed,
                 sample = vcf_shard_pair_pbsv.right,
                 filter_indel_py = filter_indel_script,
-                svpoplib_tgz = svpoplib,
         }
         
         call FiltSVDupInv {
             input:
                 pbsvbedIn = ProcessPBSVVcf.bed,
                 filter_inv_dup_py = filter_inv_dup_script,
-                svpoplib_tgz = svpoplib,
                 sample = vcf_shard_pair_pbsv.right,
         }
         call CombineSVs {
@@ -222,7 +219,6 @@ task FiltSVIndels {
     input {
         File pbsvbedIn
         File filter_indel_py
-        File svpoplib_tgz
         String sample
         
         RuntimeAttr? runtime_attr_override
@@ -262,7 +258,6 @@ task FiltSVDupInv {
     input {
         File pbsvbedIn
         File filter_inv_dup_py
-        File svpoplib_tgz
         String sample
         
         RuntimeAttr? runtime_attr_override
