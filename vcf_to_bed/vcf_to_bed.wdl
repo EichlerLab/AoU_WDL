@@ -6,7 +6,7 @@ workflow vcf_to_bed {
         File ordered_sample_names
         File ordered_sniffles_vcf_shards_list
         File sniffles_format_script
-        File svpoplib
+        File ordered_pav_vcf_shards_list
         File ordered_pbsv_vcf_shards_list
         File filter_indel_script
         File filter_inv_dup_script
@@ -24,7 +24,8 @@ workflow vcf_to_bed {
     Array[File] input_sniffles_vcfs = read_lines(ordered_sniffles_vcf_shards_list)
     Array[File] input_sample_names = read_lines(ordered_sample_names)
     Array[File] input_pbsv_vcfs = read_lines(ordered_pbsv_vcf_shards_list)
-    
+    Array[File] input_pav_vcfs = read_lines(ordered_pav_vcf_shards_list)
+
     scatter (vcf_shard_pair_sniff in zip(input_sniffles_vcfs, input_sample_names)) {
         call ProcessSnifflesVcf {
             input:
@@ -160,7 +161,7 @@ task FiltSnifflesSV {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/sound-memory-266616/auo-utils@sha256:a2131614de8388e3b8d1a1299dd6d5120f472a64617d2515a2bbffa7e15a7e1e"
+        docker:             "us.gcr.io/genial-venture-385019/auo-utils:0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -243,7 +244,7 @@ task FiltSVIndels {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/sound-memory-266616/auo-utils@sha256:a2131614de8388e3b8d1a1299dd6d5120f472a64617d2515a2bbffa7e15a7e1e"
+        docker:             "us.gcr.io/genial-venture-385019/auo-utils:0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -282,7 +283,7 @@ task FiltSVDupInv {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/sound-memory-266616/auo-utils@sha256:a2131614de8388e3b8d1a1299dd6d5120f472a64617d2515a2bbffa7e15a7e1e"
+        docker:             "us.gcr.io/genial-venture-385019/auo-utils:0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -321,7 +322,7 @@ task CombineSVs {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/sound-memory-266616/auo-utils@sha256:a2131614de8388e3b8d1a1299dd6d5120f472a64617d2515a2bbffa7e15a7e1e"
+        docker:             "us.gcr.io/genial-venture-385019/auo-utils:0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
