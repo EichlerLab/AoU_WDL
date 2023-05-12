@@ -135,7 +135,6 @@ task FiltSnifflesSV {
     input {
         File snifflesbedIn
         File filter_sniffles_sv_py
-        File svpoplib_tgz
         String sample
         
         RuntimeAttr? runtime_attr_override
