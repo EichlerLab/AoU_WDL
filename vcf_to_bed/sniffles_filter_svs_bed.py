@@ -16,7 +16,7 @@ df = pd.read_csv(args.bed_file, sep='\t')
 df = svpoplib.varbed.bcftools_query_to_tsv(df, args.sample)
 
 del(df['REF'], df['ALT'])
-df = df.loc[test_df['SVLEN'] != '.'].copy()
+df = df.loc[df['SVLEN'] != '.'].copy()
 df['SVLEN'] = df['SVLEN'].astype(int)
 df['SVLEN'] = np.abs(df['SVLEN'])
 
