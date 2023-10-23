@@ -370,7 +370,7 @@ task allMatrix {
   RuntimeAttr default_attr = object {
       cpu_cores:          1,
       mem_gb:             8,
-      disk_gb:            10,
+      disk_gb:            100,
       boot_disk_gb:       10,
       preemptible_tries:  2,
       max_retries:        1,
