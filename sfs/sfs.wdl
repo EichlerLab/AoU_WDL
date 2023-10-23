@@ -78,7 +78,20 @@ workflow sfs_sv {
                 GTCoverH1 = gt_hap_pair.left,
                 GTCoverH2 = gt_hap_pair.right,
         }
+    }
+    scatter (gt_callerset_pair in zip(callersetUnique.gtOut, combineGT.combineGTBed)) {
+        call sampleGT {
+            input:
+                aouWDL = aouWDL,
+                GTCallable = gt_callerset_pair.right,
+                GTCallerset = gt_callerset_pair.left,
+        }
     }    
+    call allMatrix {
+        input:
+            aouWDL = aouWDL,
+            GT_beds = sampleGT.sampleGTBed,
+    }
 
 
     output {
@@ -89,7 +102,8 @@ workflow sfs_sv {
         Array[File] sample_h1_gt = convertGTH1.GTBed
         Array[File] sample_h2_gt = convertGTH2.GTBed
         Array[File] sample_gt_both = combineGT.combineGTBed
-
+        Array[File] sample_gt_all = sampleGT.sampleGTBed
+        File all_matrix = allMatrix.matrixOut 
     }
 }
 
@@ -273,6 +287,83 @@ task combineGT {
 
   output {
     File combineGTBed = "asm_both.GT.bed"
+  }
+
+  #########################
+  RuntimeAttr default_attr = object {
+      cpu_cores:          1,
+      mem_gb:             8,
+      disk_gb:            10,
+      boot_disk_gb:       10,
+      preemptible_tries:  2,
+      max_retries:        1,
+      docker:             "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  runtime {
+      cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+      memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+      disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+      bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+      preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+      maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+      docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+  }
+}
+
+task sampleGT {
+  input {
+    File GTCallable
+    File GTCallerset
+    File aouWDL
+    RuntimeAttr? runtime_attr_override
+  }
+
+  command <<<
+    tar zxvf ~{aouWDL}
+    python AoU_WDL/sfs/sample_gt.py ~{GTCallable} ~{GTCallerset} sample.GT.bed
+  >>>
+
+  output {
+    File combineGTBed = "sample.GT.bed"
+  }
+
+  #########################
+  RuntimeAttr default_attr = object {
+      cpu_cores:          1,
+      mem_gb:             8,
+      disk_gb:            10,
+      boot_disk_gb:       10,
+      preemptible_tries:  2,
+      max_retries:        1,
+      docker:             "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  runtime {
+      cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+      memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+      disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+      bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+      preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+      maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+      docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+  }
+}
+
+task allMatrix {
+  input {
+    Array[File] GT_beds
+    File aouWDL
+    RuntimeAttr? runtime_attr_override
+  }
+
+  command <<<
+    tar zxvf ~{aouWDL}
+    python AoU_WDL/sfs/combine_samples.py samples_ALL.GT.bed ~{GT_beds}
+  >>>
+
+  output {
+    File combineGTBed = "samples_ALL.GT.bed"
   }
 
   #########################
