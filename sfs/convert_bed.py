@@ -14,7 +14,7 @@ if __name__ == '__main__':
         df = pd.read_csv(cover_bed_path, sep='\t', dtype=str, header=None, names=['#CHROM', 'POS', 'END', 'ID', 'SAMPLE', 'ITEMS', 'BASES_COV', 'BASES_WND', 'PERC_COV'])
         sample = df.iloc[0]['SAMPLE']
 
-        df[f'{sample}_{hap}'] = df.apply(lambda row: "0" if row['PERC_COV'] == 1 else ".", axis=1)
+        df[f'{sample}_{hap}'] = df.apply(lambda row: "0" if int(row['PERC_COV']) == 1 else ".", axis=1)
         df[['ID', f'{sample}_{hap}']].to_csv(outfile_path, sep='\t', index=False)
 
 
