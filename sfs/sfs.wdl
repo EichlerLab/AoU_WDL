@@ -118,7 +118,7 @@ task mergeBed {
   }
 
   command <<<
-    cut -f 6,8,9 | sort -k1,1 -k2,2n | bedtools merge -i - > ~{sample + "-asm_" + hap + ".callable.bed"} 
+    cut -f 6,8,9 ~{pafIn} | sort -k1,1 -k2,2n | bedtools merge -i - > ~{sample + "-asm_" + hap + ".callable.bed"} 
   >>>
 
 
