@@ -22,7 +22,7 @@ workflow asm_stats {
                 hap = "h1",
         }
     }
-    scatter (paf_sample_pair in zip(input_paf_h1, input_sample_names)) {
+    scatter (paf_sample_pair in zip(input_paf_h2, input_sample_names)) {
         call asmAlign as asmAlignH2 {
             input:
                 pafIn = paf_sample_pair.left,
