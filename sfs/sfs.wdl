@@ -359,7 +359,7 @@ task allMatrix {
 
   command <<<
     tar zxvf ~{aouWDL}
-    python AoU_WDL/sfs/all_matrix.py samples_ALL.GT.bed ~{GT_beds}
+    python AoU_WDL/sfs/all_matrix.py samples_ALL.GT.bed ~{sep=" " GT_beds}
   >>>
 
   output {
