@@ -325,7 +325,7 @@ task sampleGT {
   >>>
 
   output {
-    File combineGTBed = "sample.GT.bed"
+    File sampleGTBed = "sample.GT.bed"
   }
 
   #########################
