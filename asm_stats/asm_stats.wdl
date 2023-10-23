@@ -51,7 +51,7 @@ task asmAlign {
   }
 
   command <<<
-    cut -f 1,2 | sort -u | awk -vOFS="\t" '{print $1,$2,"~{sample}"}' >  ~{sample + "-asm_" + hap + ".ctg.tab"}  
+    cut -f 1,2 ~{pafIn} | sort -u | awk -vOFS="\t" '{print $1,$2,"~{sample}"}' >  ~{sample + "-asm_" + hap + ".ctg.tab"}  
   >>>
 
 
