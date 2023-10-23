@@ -22,10 +22,6 @@ workflow asm_stats {
                 sample = paf_sample_pair.right,
                 hap = "h1",
         }
-        call combineHapAsm as combineHapAsmH1 {
-            input:
-                asm_all = asmAlignH1.tabOut,
-        }
     }
     scatter (paf_sample_pair in zip(input_paf_h1, input_sample_names)) {
         call asmAlign as asmAlignH2 {
