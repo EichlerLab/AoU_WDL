@@ -33,8 +33,8 @@ workflow asm_stats {
     }
     call combineAsm {
         input:
-            hap1_list = combineHapAsmH1.tabOut,
-            hap2_list = combineHapAsmH2.tabOut,
+            hap1_list = asmAlignH1.tabOut,
+            hap2_list = asmAlignH2.tabOut,
     }
     output {
         File all_lens = combineAsm.tabOut 
