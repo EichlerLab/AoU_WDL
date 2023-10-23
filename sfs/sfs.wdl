@@ -45,30 +45,35 @@ workflow sfs_sv {
     }
     scatter (callerset_hap_pair in zip(mergeBedH1.bedOut, callersetUnique.unfoundOut)) {
         call coverGT as coverGTH1 {
-            callableBed = callerset_hap_pair.left,
-            unfoundBed = callerset_hap_pair.right,
-            hap = "h1",
+            input:
+                callableBed = callerset_hap_pair.left,
+                unfoundBed = callerset_hap_pair.right,
+                hap = "h1",
         }
         call convertGT as convertGTH1 {
-            coverBed = coverGTH1.coverBed,
-            hap = "h1",
+            input:
+                coverBed = coverGTH1.coverBed,
+                hap = "h1",
         }
     }
     scatter (callerset_hap_pair in zip(mergeBedH2.bedOut, callersetUnique.unfoundOut)) {
         call coverGT as coverGTH2 {
-            callableBed = callerset_hap_pair.left,
-            unfoundBed = callerset_hap_pair.right,
-            hap = "h2",
+            input:
+                callableBed = callerset_hap_pair.left,
+                unfoundBed = callerset_hap_pair.right,
+                hap = "h2",
         }
         call convertGT as convertGTH2 {
-            coverBed = coverGTH2.coverBed,
-            hap = "h2",
+            input:
+                coverBed = coverGTH2.coverBed,
+                hap = "h2",
         }
     }
     scatter (gt_hap_pair in zip(convertGTH1.GTBed, convertGTH2.GTBed)) {
         call combineGT {
-            GTCoverH1 = gt_hap_pair.left,
-            GTCoverH2 = gt_hap_pair.right,
+            input:
+                GTCoverH1 = gt_hap_pair.left,
+                GTCoverH2 = gt_hap_pair.right,
         }
     }    
 
