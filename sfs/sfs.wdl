@@ -246,7 +246,7 @@ task convertGT {
   >>>
 
   output {
-    File GTBed = "asm_{hap}.GT.bed"
+    File GTBed = "asm_~{hap}.GT.bed"
   }
 
   #########################
