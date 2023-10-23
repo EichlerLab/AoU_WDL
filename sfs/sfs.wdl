@@ -53,6 +53,7 @@ workflow sfs_sv {
         call convertGT as convertGTH1 {
             input:
                 coverBed = coverGTH1.coverBed,
+                aouWDL = aouWDL,
                 hap = "h1",
         }
     }
@@ -66,12 +67,14 @@ workflow sfs_sv {
         call convertGT as convertGTH2 {
             input:
                 coverBed = coverGTH2.coverBed,
+                aouWDL = aouWDL,
                 hap = "h2",
         }
     }
     scatter (gt_hap_pair in zip(convertGTH1.GTBed, convertGTH2.GTBed)) {
         call combineGT {
             input:
+                aouWDL = aouWDL,
                 GTCoverH1 = gt_hap_pair.left,
                 GTCoverH2 = gt_hap_pair.right,
         }
