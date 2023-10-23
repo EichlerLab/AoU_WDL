@@ -92,7 +92,7 @@ task combineAsm {
   }
 
   command <<<
-    paste <( cat ~{hap1_list} ) <( cat ~{hap2_list} ) > all_lens.ctg.tab
+    paste <( cat ~{sep (" ", hap1_list} ) <( cat ~{sep (" ", hap2_list} ) > all_lens.ctg.tab
   >>>
 
 
