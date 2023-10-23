@@ -43,6 +43,7 @@ workflow asm_stats {
     output {
         File all_lens = combineAsm.tabOut 
     }
+}
 
 
 task asmAlign {
