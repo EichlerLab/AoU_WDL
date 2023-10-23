@@ -6,7 +6,6 @@ workflow asm_stats {
       File input_sample_names_list
       File input_paf_h1_list
       File input_paf_h2_list
-      File aouWDL
     }
     meta {
         workflow_description: "Assembly stats"
