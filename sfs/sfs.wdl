@@ -359,11 +359,11 @@ task allMatrix {
 
   command <<<
     tar zxvf ~{aouWDL}
-    python AoU_WDL/sfs/combine_samples.py samples_ALL.GT.bed ~{GT_beds}
+    python AoU_WDL/sfs/all_matrix.py samples_ALL.GT.bed ~{GT_beds}
   >>>
 
   output {
-    File combineGTBed = "samples_ALL.GT.bed"
+    File matrixOut = "samples_ALL.mtx.tab"
   }
 
   #########################

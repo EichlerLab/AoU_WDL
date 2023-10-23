@@ -15,7 +15,7 @@ if __name__ == '__main__':
         h1_df = pd.read_csv(h1_path, sep='\t', dtype=str)
         h2_df = pd.read_csv(h2_path, sep='\t', dtype=str)
 
-        df = pd.merge(h1_df, h2_df, on='ID')
+        df = h1_df.merge(h2_df, on='ID')
 
         assert len(df) == len(h1_df)
 
