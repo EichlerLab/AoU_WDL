@@ -17,7 +17,7 @@ if __name__ == '__main__':
     all_calls_path = sys.argv[2]
     outpath_unique = sys.argv[3]
     outpath_gt = sys.argv[4]
-    sample_name = sys.argv[5]
+    sample = sys.argv[5]
 
     try:
         callerset = pd.read_csv(callerset_path, sep='\t', dtype=str)
@@ -29,7 +29,9 @@ if __name__ == '__main__':
         shared_df[f'{sample}_h2'] = shared_df['GT'].str.split("|", expand=True)[1]
 
         shared_df[['ID', f'{sample}_h1', f'{sample}_h2']].to_csv(f'{outpath_gt}', index=False)
-        unique_all_calls[['#CHROM', 'POS', 'END', 'ID']].to_csv(f'{outpath_unique}', index=False)
+        unique_all_calls['SAMPLE'] = sample
+
+        unique_all_calls[['#CHROM', 'POS', 'END', 'ID', 'SAMPLE']].to_csv(f'{outpath_unique}', index=False)
 
         print("Merged DataFrame (shared IDs):")
         print(shared_df)

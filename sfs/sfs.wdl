@@ -43,11 +43,45 @@ workflow sfs_sv {
                 aouWDL = aouWDL,
         }
     }
+    scatter (callerset_hap_pair in zip(mergeBedH1.bedOut, callersetUnique.unfoundOut)) {
+        call coverGT as coverGTH1 {
+            callableBed = callerset_hap_pair.left,
+            unfoundBed = callerset_hap_pair.right,
+            hap = "h1",
+        }
+        call convertGT as convertGTH1 {
+            coverBed = coverGTH1.coverBed,
+            hap = "h1",
+        }
+    }
+    scatter (callerset_hap_pair in zip(mergeBedH2.bedOut, callersetUnique.unfoundOut)) {
+        call coverGT as coverGTH2 {
+            callableBed = callerset_hap_pair.left,
+            unfoundBed = callerset_hap_pair.right,
+            hap = "h2",
+        }
+        call convertGT as convertGTH2 {
+            coverBed = coverGTH2.coverBed,
+            hap = "h2",
+        }
+    }
+    scatter (gt_hap_pair in zip(convertGTH1.GTBed, convertGTH2.GTBed)) {
+        call combineGT {
+            GTCoverH1 = gt_hap_pair.left,
+            GTCoverH2 = gt_hap_pair.right,
+        }
+    }    
+
+
     output {
         Array[File] sample_h1_bed = mergeBedH1.bedOut
         Array[File] sample_h2_bed = mergeBedH2.bedOut
         Array[File] sample_callerset_bed = callersetUnique.unfoundOut
         Array[File] sample_callerset_gt = callersetUnique.gtOut
+        Array[File] sample_h1_gt = convertGTH1.GTBed
+        Array[File] sample_h2_gt = convertGTH2.GTBed
+        Array[File] sample_gt_both = combineGT.combineGTBed
+
     }
 }
 
@@ -135,6 +169,125 @@ task callersetUnique {
   }
 }
 
+
+task coverGT {
+  input {
+    File callableBed
+    File unfoundBed
+    String hap
+    RuntimeAttr? runtime_attr_override
+  }
+
+  command <<<
+    bedtools coverage -a ~{unfoundBed} -b ~{callableBed} > ~{"asm_" + hap + ".cover.bed"}
+  >>>
+
+
+  output {
+    File coverBed = "asm_~{hap}.cover.bed"
+  }
+
+  #########################
+  RuntimeAttr default_attr = object {
+      cpu_cores:          1,
+      mem_gb:             8,
+      disk_gb:            10,
+      boot_disk_gb:       10,
+      preemptible_tries:  2,
+      max_retries:        1,
+      docker:             "us.gcr.io/broad-dsp-lrma/lr-basic:0.1.1"
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  runtime {
+      cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+      memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+      disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+      bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+      preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+      maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+      docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+  }
+}
+
+
+task convertGT {
+  input {
+    File coverBed
+    String hap
+    File aouWDL
+    RuntimeAttr? runtime_attr_override
+  }
+
+  command <<<
+    tar zxvf ~{aouWDL}
+    python AoU_WDL/sfs/convert_bed.py ~{coverBed} ~{hap} ~{"asm_" + hap + ".GT.bed"}
+  >>>
+
+  output {
+    File GTBed = "asm_{hap}.GT.bed"
+  }
+
+  #########################
+  RuntimeAttr default_attr = object {
+      cpu_cores:          1,
+      mem_gb:             8,
+      disk_gb:            10,
+      boot_disk_gb:       10,
+      preemptible_tries:  2,
+      max_retries:        1,
+      docker:             "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  runtime {
+      cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+      memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+      disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+      bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+      preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+      maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+      docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+  }
+}
+
+
+task combineGT {
+  input {
+    File GTCoverH1
+    File GTCoverH2
+    File aouWDL
+    RuntimeAttr? runtime_attr_override
+  }
+
+  command <<<
+    tar zxvf ~{aouWDL}
+    python AoU_WDL/sfs/combine_gt.py ~{GTCoverH1} ~{GTCoverH2} asm_both.GT.bed
+  >>>
+
+  output {
+    File combineGTBed = "asm_both.GT.bed"
+  }
+
+  #########################
+  RuntimeAttr default_attr = object {
+      cpu_cores:          1,
+      mem_gb:             8,
+      disk_gb:            10,
+      boot_disk_gb:       10,
+      preemptible_tries:  2,
+      max_retries:        1,
+      docker:             "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  runtime {
+      cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+      memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+      disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+      bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+      preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+      maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+      docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+  }
+}
 
 
 
