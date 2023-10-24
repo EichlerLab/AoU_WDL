@@ -359,17 +359,17 @@ task allMatrix {
 
   command <<<
     tar zxvf ~{aouWDL}
-    python AoU_WDL/sfs/all_matrix.py samples_ALL.GT.bed ~{sep=" " GT_beds}
+    python AoU_WDL/sfs/all_matrix.py samples_ALL.mtx.tab.gz ~{sep=" " GT_beds}
   >>>
 
   output {
-    File matrixOut = "samples_ALL.mtx.tab"
+    File matrixOut = "samples_ALL.mtx.tab.gz"
   }
 
   #########################
   RuntimeAttr default_attr = object {
       cpu_cores:          1,
-      mem_gb:             8,
+      mem_gb:             128,
       disk_gb:            250,
       boot_disk_gb:       10,
       preemptible_tries:  2,
