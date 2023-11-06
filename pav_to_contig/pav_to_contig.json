@@ -1,0 +1,11 @@
+{
+  "pav_to_contig.pav_to_contig_bash_script": "gs://fc-secure-7a7fb8ea-a1ca-4289-820a-db3d9421e657/cromwell_input/pav_to_contig/pav_to_contig.sh",
+  "pav_to_contig.make_pav_contig_bed_script": "gs://fc-secure-7a7fb8ea-a1ca-4289-820a-db3d9421e657/cromwell_input/pav_to_contig/make_pav_contig_bed.py",
+  "pav_to_contig.ordered_pav_vcfs": "gs://fc-secure-7a7fb8ea-a1ca-4289-820a-db3d9421e657/cromwell_input/pav_to_contig/ordered_pav_vcfs.txt",
+  "pav_to_contig.ordered_sample_names": "gs://fc-secure-7a7fb8ea-a1ca-4289-820a-db3d9421e657/cromwell_input/pav_to_contig/ordered_sample_names.txt",
+  "pav_to_contig.regions_bed": "gs://fc-secure-7a7fb8ea-a1ca-4289-820a-db3d9421e657/cromwell_input/pav_to_contig/{GENE_COORDS_BED}",
+  "pav_to_contig.gene_len": "{GENE_LEN}",
+  "pav_to_contig.make_faidx_inputs_script": "gs://fc-secure-7a7fb8ea-a1ca-4289-820a-db3d9421e657/cromwell_input/pav_to_contig/make_faidx_inputs.py",
+  "pav_to_contig.run_faidx_script": "gs://fc-secure-7a7fb8ea-a1ca-4289-820a-db3d9421e657/cromwell_input/pav_to_contig/run_samtools_faidx_for_sample.sh",
+  "pav_to_contig.ordered_haplotig_fastas": "gs://fc-secure-7a7fb8ea-a1ca-4289-820a-db3d9421e657/cromwell_input/pav_to_contig/ordered_haplotig_fasta_names.txt"
+}
