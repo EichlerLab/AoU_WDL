@@ -203,7 +203,7 @@ task coverGT {
   command <<<
     bedtools coverage -a ~{unfoundBed} -b ~{callableBed} > ~{"asm_" + hap + ".cover.bed"}
   >>>
-
+n
 
   output {
     File coverBed = "asm_~{hap}.cover.bed"
@@ -369,7 +369,7 @@ task allMatrix {
   #########################
   RuntimeAttr default_attr = object {
       cpu_cores:          1,
-      mem_gb:             128,
+      mem_gb:             512,
       disk_gb:            250,
       boot_disk_gb:       10,
       preemptible_tries:  2,
