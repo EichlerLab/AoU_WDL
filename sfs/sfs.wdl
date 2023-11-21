@@ -203,7 +203,6 @@ task coverGT {
   command <<<
     bedtools coverage -a ~{unfoundBed} -b ~{callableBed} > ~{"asm_" + hap + ".cover.bed"}
   >>>
-n
 
   output {
     File coverBed = "asm_~{hap}.cover.bed"
