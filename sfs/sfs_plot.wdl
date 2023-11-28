@@ -1,7 +1,7 @@
 version 1.0
 
 
-workflow sfs_sv {
+workflow sfs_plot {
     input {
       File input_all_callerset
       File input_matrix
