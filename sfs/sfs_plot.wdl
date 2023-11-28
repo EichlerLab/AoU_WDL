@@ -15,7 +15,7 @@ workflow sfs_sv {
         input:
             callerset = input_all_callerset,
             matrix = input_matrix,
-            support = "1",
+            support = "3",
             aouWDL = aouWDL,
     }
     call allMatrix as allMatrix_two {
@@ -29,7 +29,7 @@ workflow sfs_sv {
         input:
             callerset = input_all_callerset,
             matrix = input_matrix,
-            support = "3",
+            support = "1",
             aouWDL = aouWDL,
     }
 
