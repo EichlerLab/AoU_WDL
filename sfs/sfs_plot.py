@@ -18,7 +18,10 @@ df = pd.read_csv(args.matrix, sep="\t", dtype=str).fillna(".")
 print("Done reading Matrix")
 
 callerset_df = pd.read_csv(
-    args.callerset, usecols=["ID", "SUPPORT"], dtype={"ID": str, "SUPPORT": int}
+    args.callerset,
+    sep="\t",
+    usecols=["ID", "SUPPORT"],
+    dtype={"ID": str, "SUPPORT": int},
 )
 print("Done reading callerset")
 
