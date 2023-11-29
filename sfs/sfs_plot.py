@@ -14,7 +14,7 @@ parser.add_argument("--callerset", "-c", type=str, required=True, help="All call
 args = parser.parse_args()
 
 
-df = pd.read_csv(args.matrix, sep="\t", dtype=str).fillna(".")
+df = pd.read_csv(args.matrix, sep="\t", dtype=str, index_col="ID").fillna(".")
 print("Done reading Matrix")
 
 callerset_df = pd.read_csv(
@@ -25,9 +25,11 @@ callerset_df = pd.read_csv(
 )
 print("Done reading callerset")
 
-callerset_df = callerset_df.loc[callerset_df["SUPPORT"] >= args.support].copy()
+callerset_df = callerset_df.loc[callerset_df["SUPPORT"] >= args.support].copy().set_index("ID")
 
-df = pd.merge(callerset_df, df).set_index("ID")
+df = df.loc[callerset_df.index]
+
+callerset_df = pd.DataFrame()
 
 print("Done merging df")
 
