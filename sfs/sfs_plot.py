@@ -1,4 +1,4 @@
-import pandas as pd
+import polars as pl
 import argparse
 
 
@@ -12,68 +12,50 @@ parser.add_argument("--matrix", "-m", type=str, required=True, help="GT Matrix f
 parser.add_argument("--callerset", "-c", type=str, required=True, help="All callerset")
 
 args = parser.parse_args()
+df = pl.read_csv(args.matrix, sep="\t").fill_nulls(".")
 
-
-df = pd.read_csv(args.matrix, sep="\t", dtype=str, index_col="ID").fillna(".")
 print("Done reading Matrix")
 
-callerset_df = pd.read_csv(
-    args.callerset,
-    sep="\t",
-    usecols=["ID", "SUPPORT"],
-    dtype={"ID": str, "SUPPORT": int},
-)
-print("Done reading callerset")
+callerset_df = pl.read_csv(args.callerset, sep="\t", columns=["ID", "SUPPORT"], dtype={"ID": str, "SUPPORT": int})
+callerset_df = callerset_df.filter(callerset_df["SUPPORT"] >= args.support).select(["ID"]).set_index("ID")
 
-callerset_df = callerset_df.loc[callerset_df["SUPPORT"] >= args.support].copy().set_index("ID")
+df = df.join(callerset_df, on="ID", how="inner")
 
-df = df.loc[callerset_df.index]
-
-callerset_df = pd.DataFrame()
+callerset_df = pl.DataFrame()
 
 print("Done merging df")
 
 sample_list = [x for x in df.columns if x not in ["VAR", "OBS", "FREQ", "SUPPORT"]][2:]
 
-out_df = pd.DataFrame()
+out_df = pl.DataFrame()
 
-df["VAR"] = 0
-df["OBS"] = 0
+df = df.with_column(pl.col("VAR", pl.lit(0))).with_column(pl.col("OBS", pl.lit(0)))
 
 for sample in sample_list:
-    df["VAR"] = df.apply(
-        lambda row: row["VAR"] + 1 if row[sample] == "1" else row["VAR"], axis=1
+    df = df.with_column(
+        "VAR",
+        pl.when(df[sample] == "1").then(df["VAR"] + 1).otherwise(df["VAR"]),
     )
-    df["OBS"] = df.apply(
-        lambda row: row["OBS"] + 1 if row[sample] != "." else row["OBS"], axis=1
+    df = df.with_column(
+        "OBS",
+        pl.when(df[sample] != ".").then(df["OBS"] + 1).otherwise(df["OBS"]),
     )
-    df["FREQ"] = df["VAR"] / df["OBS"]
-    df_var = df.loc[df["VAR"] > 0].copy()
-    out_df = pd.concat(
+    df = df.with_column("FREQ", df["VAR"] / df["OBS"])
+    df_var = df.filter(df["VAR"] > 0).clone()
+    out_df = pl.concat(
         [
             out_df,
-            pd.DataFrame.from_dict(
+            pl.DataFrame(
                 {
-                    "SINGLETON": [
-                        len(df_var.loc[(df_var["VAR"] == 1) & (df_var["FREQ"] != 1)])
-                    ],
-                    "POLY": [
-                        len(df_var.loc[(df_var["VAR"] > 1) & (df_var["FREQ"] < 0.5)])
-                    ],
-                    "MAJOR": [
-                        len(
-                            df_var.loc[
-                                (df_var["VAR"] > 1)
-                                & (df_var["FREQ"] >= 0.5)
-                                & (df_var["FREQ"] < 1)
-                            ]
-                        )
-                    ],
-                    "FIXED": [len(df_var.loc[df_var["FREQ"] == 1])],
+                    "SINGLETON": [len(df_var.filter((df_var["VAR"] == 1) & (df_var["FREQ"] != 1)))],
+                    "POLY": [len(df_var.filter((df_var["VAR"] > 1) & (df_var["FREQ"] < 0.5)))],
+                    "MAJOR": [len(df_var.filter((df_var["VAR"] > 1) & (df_var["FREQ"] >= 0.5) & (df_var["FREQ"] < 1)))],
+                    "FIXED": [len(df_var.filter(df_var["FREQ"] == 1))],
                 }
             ),
-        ]
-    ).reset_index(drop=True)
+        ],
+        ignore_index=True,
+    )
     print(f"{sample}")
 
-out_df.to_csv(args.output, sep="\t", index=False)
+out_df.write_csv(args.output, delimiter="\t", with_header=True)
