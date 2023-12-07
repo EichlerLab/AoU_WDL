@@ -1,0 +1,6 @@
+{
+  "align_reads_to_contig_hifi.input_ordered_sample_names_list": "{BUCKET}/cromwell_input/align_reads_to_contig_hifi/ordered_sample_names_test.txt",
+  "align_reads_to_contig_hifi.input_ordered_asm_h1_list": "{BUCKET}/cromwell_input/align_reads_to_contig_hifi/ordered_haplotig_fasta_names_h1_test.txt",
+  "align_reads_to_contig_hifi.input_ordered_asm_h2_list": "{BUCKET}/cromwell_input/align_reads_to_contig_hifi/ordered_haplotig_fasta_names_h2_test.txt",
+  "align_reads_to_contig_hifi.input_ordered_reads_list": "{BUCKET}/cromwell_input/align_reads_to_contig_hifi/ordered_read_fastqs_test.txt"
+}
