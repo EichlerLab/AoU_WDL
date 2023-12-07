@@ -1,0 +1,12 @@
+{
+  "bam_to_contig.bam_to_contig_bash_script": "{BUCKET}/cromwell_input/bam_to_contig/bam_to_contig.sh",
+  "bam_to_contig.make_contig_bed_script": "{BUCKET}/cromwell_input/bam_to_contig/make_contig_bed.py",
+  "bam_to_contig.ordered_sample_names_w_hap": "{BUCKET}/cromwell_input/bam_to_contig/ordered_sample_names_w_hap.txt",
+  "bam_to_contig.ordered_bams": "{BUCKET}/cromwell_input/bam_to_contig/ordered_bam_names.txt",
+  "bam_to_contig.ordered_bais": "{BUCKET}/cromwell_input/bam_to_contig/ordered_bai_names.txt",
+  "bam_to_contig.ordered_haplotig_fastas": "{BUCKET}/cromwell_input/bam_to_contig/ordered_haplotig_fasta_names.txt",
+  "bam_to_contig.regions_bed": "{BUCKET}/cromwell_input/bam_to_contig/{GENE_COORDS_BED}",
+  "bam_to_contig.flank_bp": "{FLANK_BP}",
+  "bam_to_contig.run_faidx_script": "{BUCKET}/cromwell_input/bam_to_contig/run_samtools_faidx_for_sample.sh",
+  "bam_to_contig.concat_contigs_script": "{BUCKET}/cromwell_input/bam_to_contig/concat_contigs.py"
+}
