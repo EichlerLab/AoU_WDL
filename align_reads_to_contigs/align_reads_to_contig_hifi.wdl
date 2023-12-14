@@ -20,26 +20,17 @@ workflow align_reads_to_contig_hifi {
         File asm_h1 = input_asm_h1[i]
         File asm_h2 = input_asm_h2[i]
         File reads = input_reads[i]
-        call alignToAsm as alignToAsmH1 {
+        call alignToAsm {
             input:
                 sample = sample,
-                hap = "hap1",
-                asmIn = asm_h1,
-                readsIn = reads
-        }
-        call alignToAsm as alignToAsmH2 {
-            input:
-                sample = sample,
-                hap = "hap2",
-                asmIn = asm_h2,
+                asmH1In = asm_h1,
+                asmH2In = asm_h2,
                 readsIn = reads
         }
     }
     output {
-        Array[File] sample_h1_bams = alignToAsmH1.bamOut
-        Array[File] sample_h1_idx = alignToAsmH1.baiOut
-        Array[File] sample_h2_bams = alignToAsmH2.bamOut
-        Array[File] sample_h2_idx = alignToAsmH2.baiOut
+        Array[File] sample_crams = alignToAsm.cramOut
+        Array[File] sample_idx = alignToAsm.craiOut
     }
 }
 
@@ -47,31 +38,34 @@ workflow align_reads_to_contig_hifi {
 task alignToAsm {
   input {
     String sample
-    String hap
-    File asmIn
+    File asmH1In
+    File asmH2In
     File readsIn
 
     RuntimeAttr? runtime_attr_override
   }
 
   command <<<
-    minimap2 -a -t 4 -I 10G -Y -x map-pb --eqx -L --cs ~{asmIn} ~{readsIn} | samtools sort -o ~{sample}-asm_~{hap}.minimap2.bam -;samtools index ~{sample}-asm_~{hap}.minimap2.bam
+    zcat ~{asmH1In} ~{asmH2In} | bgzip -c > ~{sample}_both_haps.fa.gz
+    samtools faidx ~{sample}_both_haps.fa.gz
+    minimap2 -a -t 4 -I 10G -Y -x map-pb --eqx -L --cs ~{sample}_both_haps.fa.gz ~{readsIn} | \
+    samtools sort -o ~{sample}-asm.minimap2.cram --reference ~{sample}_both_haps.fa.gz
+    samtools index ~{sample}-asm.minimap2.cram
   >>>
 
-
   output {
-    File bamOut = "~{sample}-asm_~{hap}.minimap2.bam"
-    File baiOut = "~{sample}-asm_~{hap}.minimap2.bam.bai"
+    File cramOut = "~{sample}-asm.minimap2.cram"
+    File craiOut = "~{sample}-asm.minimap2.cram.crai"
   }
 
   #########################
   RuntimeAttr default_attr = object {
       cpu_cores:          4,
-      mem_gb:             32,
-      disk_gb:            30,
-      boot_disk_gb:       30,
-      preemptible_tries:  2,
-      max_retries:        1,
+      mem_gb:             70,
+      disk_gb:            120,
+      boot_disk_gb:       120,
+      preemptible_tries:  1,
+      max_retries:        0,
       docker:             "us.gcr.io/broad-dsp-lrma/lr-asm:0.1.14"
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
