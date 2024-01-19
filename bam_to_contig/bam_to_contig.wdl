@@ -87,7 +87,7 @@ task RunBamToContig {
       disk_gb:            10,
       boot_disk_gb:       10,
       preemptible_tries:  1,
-      max_retries:        1,
+      max_retries:        0,
       docker: "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
@@ -126,7 +126,7 @@ task RunFaidx {
       disk_gb:            10,
       boot_disk_gb:       10,
       preemptible_tries:  1,
-      max_retries:        1,
+      max_retries:        0,
       docker: "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
@@ -163,7 +163,7 @@ task ConcatContigs {
       disk_gb:            10,
       boot_disk_gb:       10,
       preemptible_tries:  1,
-      max_retries:        1,
+      max_retries:        0,
       docker: "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
