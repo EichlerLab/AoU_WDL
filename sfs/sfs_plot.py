@@ -12,6 +12,8 @@ parser.add_argument("--matrix", "-m", type=str, required=True, help="GT Matrix f
 parser.add_argument("--callerset", "-c", type=str, required=True, help="All callerset")
 
 args = parser.parse_args()
+
+
 df = pl.read_csv(args.matrix, sep="\t").fill_nulls(".")
 
 print("Done reading Matrix")
