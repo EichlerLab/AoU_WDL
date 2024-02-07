@@ -40,6 +40,7 @@ workflow sfs_sv {
             sniffles_vcf = concat_norm_sniffles.vcf,
             sample = sample,
             pbsv_vcf = pbsv_vcf,
+            ref = input_ref,
             pav_vcf = pav_vcf,
             svpop_config = svpop_config,
             svpop_tsv = svpop_tsv,
@@ -124,7 +125,7 @@ task retrieve_seq {
       boot_disk_gb:       10,
       preemptible_tries:  2,
       max_retries:        1,
-      docker:             "us.gcr.io/broad-dsp-lrma/lr-basic:0.1.1"
+      docker:             "us.gcr.io/broad-dsp-lrma/aou-lr/svpop:0.0.14"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -182,6 +183,7 @@ call run_svpop {
         File pbsv_vcf
         File pav_vcf
         File svpop_config
+        File ref
         File svpop_tsv
         Int threads
     }
@@ -189,12 +191,12 @@ call run_svpop {
         mkdir -p config
         cp -l ~{svpop_config} config/config.json
         cp -l ~{svpop_tsv} config/samples.tsv
-        mkdir -p link_data/
+        mkdir -p link_data/ref/
         cp -l ~{sniffles_vcf} ~{"link_data/" + sample + ".sniffles.vcf.gz"}
         cp -l ~{pav_vcf} ~{"link_data/" + sample + ".pav.vcf.gz"}
         cp -l ~{pbsv_vcf} ~{"link_data/" + sample + ".pbsv.vcf.gz"}
+        cp -l ~{ref} link_data/ref/ref.fa
         find link_data -type f | xargs -i tabix -p vcf {}
-        git clone https://github.com/EichlerLab/svpop.git
         snakemake -s svpop/Snakefile -j ~{threads} -k --restart-times 1 ~{"results/variant/callerset/aou/" + sample + "/all/all/bed/sv_insdel.bed.gz"}
     >>>
     output {
@@ -207,7 +209,7 @@ call run_svpop {
       boot_disk_gb:       10,
       preemptible_tries:  2,
       max_retries:        1,
-      docker:             "us.gcr.io/broad-dsp-lrma/lr-basic:0.1.1"
+      docker:             "us.gcr.io/broad-dsp-lrma/aou-lr/svpop:0.0.14"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -240,7 +242,7 @@ task svpop_vcf_body {
       boot_disk_gb:       10,
       preemptible_tries:  2,
       max_retries:        1,
-      docker:             "us.gcr.io/broad-dsp-lrma/lr-basic:0.1.1"
+      docker:             "us.gcr.io/broad-dsp-lrma/aou-lr/svpop:0.0.14"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
