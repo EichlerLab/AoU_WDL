@@ -2,6 +2,7 @@
 
 import pandas as pd
 from Bio import SeqIO
+import argparse
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter) 
 
