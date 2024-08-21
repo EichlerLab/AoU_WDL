@@ -7,7 +7,7 @@ gene_region_bed = sys.argv[2]
 locus_buffer = int(sys.argv[3])
 
 with open(gene_region_bed) as f:
-    chrom, locus_pos, locus_end = f.readline().strip().split('\\t')
+    chrom, locus_pos, locus_end = f.readline().strip().split('\t')
 locus_pos = int(locus_pos)
 locus_end = int(locus_end)
 locus_pos_buffered = locus_pos - locus_buffer
