@@ -13,8 +13,8 @@ with open(out_fname, 'w') as out_f:
       for line in f:
         if line.startswith('>'):
           if '/rc' in line:  # Reverse strand
-              out_f.write(f">{contig_name}/rc:{line.split(':')[1]}")
+              out_f.write(f">{contig_name}/rc:{line.strip('>')}")
           else:
-              out_f.write(f">{contig_name}:{line.split(':')[1]}")
+              out_f.write(f">{contig_name}:{line.strip('>')}")
         else:
           out_f.write(line)
