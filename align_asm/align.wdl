@@ -82,11 +82,11 @@ task alignToRef {
   RuntimeAttr default_attr = object {
       cpu_cores:          threads,
       mem_gb:             32,
-      disk_gb:            10,
-      boot_disk_gb:       10,
-      preemptible_tries:  2,
+      disk_gb:            11,
+      boot_disk_gb:       11,
+      preemptible_tries:  1,
       max_retries:        1,
-      docker:             "us.gcr.io/broad-dsp-lrma/lr-asm:0.1.13"
+      docker:             "eichlerlab/assembly_eval:0.2"
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
   runtime {
@@ -114,14 +114,7 @@ task compressAndIndex {
     samtools view -b ~{samIn} | samtools sort -O bam -o ~{sample + "-asm_" + hap + ".minimap2.bam"} -
     samtools index ~{sample + "-asm_" + hap + ".minimap2.bam"}
 
-    MM2_VERSION="2.24"
-
-    /minimap2-${MM2_VERSION}_x64-linux/k8 \
-    /minimap2-${MM2_VERSION}_x64-linux/paftools.js \
-    sam2paf \
-    -L \
-    ~{samIn} \
-    > ~{sample + "-asm_" + hap + ".minimap2.paf"}
+    k8 $(which paftools.js) sam2paf -L ~{samIn} > ~{sample + "-asm_" + hap + ".minimap2.paf"}
   >>>
 
 
@@ -135,11 +128,11 @@ task compressAndIndex {
   RuntimeAttr default_attr = object {
       cpu_cores:          1,
       mem_gb:             4,
-      disk_gb:            10,
-      boot_disk_gb:       10,
-      preemptible_tries:  2,
+      disk_gb:            11,
+      boot_disk_gb:       11,
+      preemptible_tries:  1,
       max_retries:        1,
-      docker:             "us.gcr.io/broad-dsp-lrma/lr-align:0.1.28"
+      docker:             "eichlerlab/assembly_eval:0.2"
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
   runtime {
