@@ -9,6 +9,7 @@ workflow bam_to_contig {
     File ordered_bais
     File ordered_haplotig_fastas
     File regions_bed
+    File ref_chrom_fa
     Int flank_bp
     File run_faidx_script
     File concat_contigs_script
@@ -37,6 +38,7 @@ workflow bam_to_contig {
             bam_in = bam_in,
             bai_in = bai_in,
             regions_bed = regions_bed,
+            ref_chrom_fa = ref_chrom_fa,
             flank_bp = flank_bp
       }
       call RunFaidx {
@@ -67,13 +69,14 @@ task RunBamToContig {
       File bam_in
       File bai_in
       File regions_bed
+      File ref_chrom_fa
       Int flank_bp
       String sample_w_hap
 
       RuntimeAttr? runtime_attr_override
     }
     command <<<
-      sh ~{bam_to_contig_bash_script} ~{make_contig_bed_script} ~{bam_in} ~{regions_bed} ~{flank_bp} > ~{sample_w_hap}.txt
+      sh ~{bam_to_contig_bash_script} ~{make_contig_bed_script} ~{bam_in} ~{regions_bed} ~{ref_chrom_fa} ~{flank_bp} > ~{sample_w_hap}.txt
     >>>
 
     output {
