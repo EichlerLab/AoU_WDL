@@ -1,11 +1,19 @@
 # Get bam segment in reference region
 import sys
 import pysam
+import re
+from collections import namedtuple
 
-in_bam = sys.argv[1]
+in_aln = sys.argv[1]  # bam or paf
 gene_region_bed = sys.argv[2]
 ref_chrom_seq_fname = sys.argv[3]
 locus_buffer = int(sys.argv[4])
+
+AlignRec = namedtuple('AlignRec', [
+    'query_name', 'query_length', 'query_start', 'query_end', 'strand', 'target_name', 'reference_start', 'cigartuples'
+])
+
+CIGAR_OPS = {'M': 0, 'I': 1, 'D': 2, 'N': 3, 'S': 4, 'H': 5, 'P': 6, '=': 7, 'X': 8, 'B': 9}
 
 def main():
     with open(gene_region_bed) as f:
@@ -17,10 +25,32 @@ def main():
     with open(ref_chrom_seq_fname) as f:
         ref_chrom_seq = ''.join([z.strip() for z in f.readlines() if not z.startswith('>')]).upper()
 
-    s = pysam.AlignmentFile(in_bam, "rb")  # 1000151-asm_h1.minimap2.bam
-    for r in s.fetch(reference=chrom, start=locus_pos_buffered, end=locus_end_buffered):
-        is_rev_strand = r.flag & 0x10 != 0
-        aligned_pairs, hardclip_len = get_aligned_pairs_eqx(r, ref_chrom_seq, is_rev_strand)
+    is_paf = False
+    if in_aln.endswith('.bam'):
+        s = pysam.AlignmentFile(in_aln, "rb")
+        rec_iter = s.fetch(reference=chrom, start=locus_pos_buffered, end=locus_end_buffered)
+    else:
+        assert in_aln.endswith('.paf')
+        rec_iter = open(in_aln) 
+        is_paf = True
+
+    for r in rec_iter:
+        if is_paf:
+            line = r.strip().split('\t')
+            # make sure overlaps locus
+            if (line[5] != chrom) or (int(line[8]) < locus_pos) or (int(line[7]) > locus_end):
+                continue
+            cigar_cols = [z for z in line if z.startswith('cg:Z:')]
+            assert(len(cigar_cols)) == 1
+            cigar_col = cigar_cols[0]
+            r = AlignRec(
+                line[0], int(line[1]), int(line[2]), int(line[3]), line[4], line[5], int(line[7]),
+                [(CIGAR_OPS[op], int(length)) for length, op in re.findall(r'(\d+)([MIDNSHP=XB])', cigar_col.replace('cg:Z:', ''))]
+            )
+        is_rev_strand = r.strand == '-' if (is_paf) else r.flag & 0x10 != 0
+        aligned_pairs, hardclip_len = get_aligned_pairs_eqx(r, ref_chrom_seq, is_rev_strand, is_paf)
+        if is_paf:
+            hardclip_len = r.query_end if (is_rev_strand) else r.query_start
         #print(aligned_pairs[:10], aligned_pairs[-10:])
         all_pairs = [p for p in aligned_pairs if (
             (p[3] is not None) and (p[3] >= locus_pos_buffered) and (p[3] <= locus_end_buffered)
@@ -29,7 +59,6 @@ def main():
             continue
         all_ref = [z[3] for z in all_pairs]
         all_ctg = [z[4] for z in all_pairs if z[4] is not None]
-
         #if locus_pos in all_ref and locus_end in all_ref:  # locus contained in contig
         # first and last contig coord in locus + buffer
         ctg_start = all_ctg[0]
@@ -41,22 +70,23 @@ def main():
             print(f"{r.query_name}\t{ctg_start + hardclip_len}\t{ctg_end + hardclip_len}")
 
 
-def get_aligned_pairs_eqx(read, ref_seq, is_rev_strand):
-    if read.is_unmapped:
-        return []
+def get_aligned_pairs_eqx(rec, ref_seq, is_rev_strand, is_paf):
+    #if rec.is_unmapped:
+    #    return []
     aligned_pairs = []
-    ref_pos = read.reference_start
-    query_seq = read.query_sequence.upper()
+    ref_pos = rec.reference_start
+    query_seq = None if (is_paf) else rec.query_sequence.upper()
+    query_length = rec.query_length if (is_paf) else len(query_seq)
     query_pos = 0
     hardclip_len = 0
 
-    for op_char, length in read.cigartuples:
+    for op_char, length in rec.cigartuples:
         if op_char == pysam.CEQUAL:
             # Match: both reference and query advance
             for i in range(length):
-                if ref_pos + i < len(ref_seq) and query_pos + i < len(query_seq):
+                if ref_pos + i < len(ref_seq) and query_pos + i < query_length:
                     aligned_pairs.append((
-                        ref_seq[ref_pos + i], query_seq[query_pos + i], '=',
+                        ref_seq[ref_pos + i], query_seq[query_pos + i] if (query_seq) else None, '=',
                         ref_pos + i, query_pos + i
                     ))
             ref_pos += length
@@ -65,9 +95,9 @@ def get_aligned_pairs_eqx(read, ref_seq, is_rev_strand):
         elif op_char == pysam.CDIFF:
             # Mismatch: both reference and query advance
             for i in range(length):
-                if ref_pos + i < len(ref_seq) and query_pos + i < len(query_seq):
+                if ref_pos + i < len(ref_seq) and query_pos + i < query_length:
                     aligned_pairs.append((
-                        ref_seq[ref_pos + i], query_seq[query_pos + i],
+                        ref_seq[ref_pos + i], query_seq[query_pos + i] if (query_seq) else None,
                         'X', ref_pos + i, query_pos + i
                     ))
             ref_pos += length
@@ -85,8 +115,8 @@ def get_aligned_pairs_eqx(read, ref_seq, is_rev_strand):
         elif op_char == pysam.CINS:
             # Insertion: only query advances
             for i in range(length):
-                if query_pos + i < len(query_seq):
-                    aligned_pairs.append(('-', query_seq[query_pos + i], 'I',
+                if query_pos + i < query_length:
+                    aligned_pairs.append(('-', query_seq[query_pos + i] if (query_seq) else None, 'I',
                         None, query_pos + i
                     ))
             query_pos += length
@@ -101,9 +131,10 @@ def get_aligned_pairs_eqx(read, ref_seq, is_rev_strand):
             if hardclip_len == 0 or is_rev_strand:
                 hardclip_len = length
         else:
-            raise ValueError('Unrecognized CIGAR operation')
+            raise ValueError(f'Unrecognized CIGAR operation {op_char}')
     return (aligned_pairs, hardclip_len)
 
 
 if __name__ == '__main__':
     main()
+
