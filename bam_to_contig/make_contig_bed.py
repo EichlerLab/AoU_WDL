@@ -6,8 +6,8 @@ from collections import namedtuple
 
 in_aln = sys.argv[1]  # bam or paf
 gene_region_bed = sys.argv[2]
-ref_chrom_seq_fname = sys.argv[3]
-locus_buffer = int(sys.argv[4])
+locus_buffer = int(sys.argv[3])
+ref_chrom_seq_fname = sys.argv[4] if (len(sys.argv) > 4) else None
 
 AlignRec = namedtuple('AlignRec', [
     'query_name', 'query_length', 'query_start', 'query_end', 'strand', 'target_name', 'reference_start', 'cigartuples'
@@ -22,8 +22,10 @@ def main():
     locus_end = int(locus_end)
     locus_pos_buffered = locus_pos - locus_buffer
     locus_end_buffered = locus_end + locus_buffer
-    with open(ref_chrom_seq_fname) as f:
-        ref_chrom_seq = ''.join([z.strip() for z in f.readlines() if not z.startswith('>')]).upper()
+    ref_chrom_seq = None
+    if ref_chrom_seq_fname:
+        with open(ref_chrom_seq_fname) as f:
+            ref_chrom_seq = ''.join([z.strip() for z in f.readlines() if not z.startswith('>')]).upper()
 
     is_paf = False
     if in_aln.endswith('.bam'):
@@ -48,7 +50,7 @@ def main():
                 [(CIGAR_OPS[op], int(length)) for length, op in re.findall(r'(\d+)([MIDNSHP=XB])', cigar_col.replace('cg:Z:', ''))]
             )
         is_rev_strand = r.strand == '-' if (is_paf) else r.flag & 0x10 != 0
-        aligned_pairs, hardclip_len = get_aligned_pairs_eqx(r, ref_chrom_seq, is_rev_strand, is_paf)
+        aligned_pairs, hardclip_len = get_aligned_pairs_eqx(r, is_rev_strand, is_paf, ref_chrom_seq)
         if is_paf:
             hardclip_len = r.query_end if (is_rev_strand) else r.query_start
         #print(aligned_pairs[:10], aligned_pairs[-10:])
@@ -70,7 +72,7 @@ def main():
             print(f"{r.query_name}\t{ctg_start + hardclip_len}\t{ctg_end + hardclip_len}")
 
 
-def get_aligned_pairs_eqx(rec, ref_seq, is_rev_strand, is_paf):
+def get_aligned_pairs_eqx(rec, is_rev_strand, is_paf, ref_seq=None):
     #if rec.is_unmapped:
     #    return []
     aligned_pairs = []
@@ -84,41 +86,53 @@ def get_aligned_pairs_eqx(rec, ref_seq, is_rev_strand, is_paf):
         if op_char == pysam.CEQUAL:
             # Match: both reference and query advance
             for i in range(length):
-                if ref_pos + i < len(ref_seq) and query_pos + i < query_length:
+                try:
                     aligned_pairs.append((
-                        ref_seq[ref_pos + i], query_seq[query_pos + i] if (query_seq) else None, '=',
-                        ref_pos + i, query_pos + i
+                        ref_seq[ref_pos + i] if (ref_seq) else None,
+                        query_seq[query_pos + i] if (query_seq) else None,
+                        '=', ref_pos + i, query_pos + i
                     ))
+                except IndexError:
+                    break
             ref_pos += length
             query_pos += length
             
         elif op_char == pysam.CDIFF:
             # Mismatch: both reference and query advance
             for i in range(length):
-                if ref_pos + i < len(ref_seq) and query_pos + i < query_length:
+                try:
                     aligned_pairs.append((
-                        ref_seq[ref_pos + i], query_seq[query_pos + i] if (query_seq) else None,
+                        ref_seq[ref_pos + i] if (ref_seq) else None,
+                        query_seq[query_pos + i] if (query_seq) else None,
                         'X', ref_pos + i, query_pos + i
                     ))
+                except IndexError:
+                    break
             ref_pos += length
             query_pos += length
             
         elif op_char == pysam.CDEL:
             # Deletion: only reference advances
             for i in range(length):
-                if ref_pos + i < len(ref_seq):
+                try:
                     aligned_pairs.append((
-                        ref_seq[ref_pos + i], '-', 'D', ref_pos + i, None
+                        ref_seq[ref_pos + i] if (ref_seq) else None, '-', 'D',
+                        ref_pos + i, None
                     ))
+                except IndexError:
+                    break
             ref_pos += length
             
         elif op_char == pysam.CINS:
             # Insertion: only query advances
             for i in range(length):
-                if query_pos + i < query_length:
-                    aligned_pairs.append(('-', query_seq[query_pos + i] if (query_seq) else None, 'I',
+                try:
+                    aligned_pairs.append((
+                        '-', query_seq[query_pos + i] if (query_seq) else None, 'I',
                         None, query_pos + i
                     ))
+                except IndexError:
+                    break
             query_pos += length
             
         elif op_char == pysam.CSOFT_CLIP:
