@@ -52,8 +52,8 @@ def main():
         is_rev_strand = r.strand == '-' if (is_paf) else r.flag & 0x10 != 0
         aligned_pairs, hardclip_len = get_aligned_pairs_eqx(r, is_rev_strand, is_paf, ref_chrom_seq)
         if is_paf:
-            hardclip_len = r.query_end if (is_rev_strand) else r.query_start
-        #print(aligned_pairs[:10], aligned_pairs[-10:])
+            hardclip_len = (r.query_end - r.query_length) if (is_rev_strand) else r.query_start
+        #print(hardclip_len, aligned_pairs[:10], aligned_pairs[-10:])
         all_pairs = [p for p in aligned_pairs if (
             (p[3] is not None) and (p[3] >= locus_pos_buffered) and (p[3] <= locus_end_buffered)
         )]  # ctg, ref pairs where ref. is within the locus range
