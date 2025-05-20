@@ -98,7 +98,7 @@ def get_aligned_pairs_eqx(rec, is_rev_strand, is_paf, ref_seq=None):
     hardclip_len = 0
 
     for op_char, length in rec.cigartuples:
-        if op_char == pysam.CEQUAL:
+        if op_char in [pysam.CEQUAL, pysam.CMATCH]:
             # Match: both reference and query advance
             for i in range(length):
                 try:
@@ -166,4 +166,5 @@ def get_aligned_pairs_eqx(rec, is_rev_strand, is_paf, ref_seq=None):
 
 if __name__ == '__main__':
     main()
+
 
