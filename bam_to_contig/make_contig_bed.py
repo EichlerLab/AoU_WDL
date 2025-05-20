@@ -16,60 +16,75 @@ AlignRec = namedtuple('AlignRec', [
 CIGAR_OPS = {'M': 0, 'I': 1, 'D': 2, 'N': 3, 'S': 4, 'H': 5, 'P': 6, '=': 7, 'X': 8, 'B': 9}
 
 def main():
-    with open(gene_region_bed) as f:
-        chrom, locus_pos, locus_end = f.readline().strip().split('\t')
-    locus_pos = int(locus_pos)
-    locus_end = int(locus_end)
-    locus_pos_buffered = locus_pos - locus_buffer
-    locus_end_buffered = locus_end + locus_buffer
-    ref_chrom_seq = None
-    if ref_chrom_seq_fname:
-        with open(ref_chrom_seq_fname) as f:
-            ref_chrom_seq = ''.join([z.strip() for z in f.readlines() if not z.startswith('>')]).upper()
-
-    is_paf = False
-    if in_aln.endswith('.bam'):
-        s = pysam.AlignmentFile(in_aln, "rb")
-        rec_iter = s.fetch(reference=chrom, start=locus_pos_buffered, end=locus_end_buffered)
-    else:
-        assert in_aln.endswith('.paf')
-        rec_iter = open(in_aln) 
-        is_paf = True
-
-    for r in rec_iter:
-        if is_paf:
-            line = r.strip().split('\t')
-            # make sure overlaps locus
-            if (line[5] != chrom) or (int(line[8]) < locus_pos) or (int(line[7]) > locus_end):
-                continue
-            cigar_cols = [z for z in line if z.startswith('cg:Z:')]
-            assert(len(cigar_cols)) == 1
-            cigar_col = cigar_cols[0]
-            r = AlignRec(
-                line[0], int(line[1]), int(line[2]), int(line[3]), line[4], line[5], int(line[7]),
-                [(CIGAR_OPS[op], int(length)) for length, op in re.findall(r'(\d+)([MIDNSHP=XB])', cigar_col.replace('cg:Z:', ''))]
-            )
-        is_rev_strand = r.strand == '-' if (is_paf) else r.flag & 0x10 != 0
-        aligned_pairs, hardclip_len = get_aligned_pairs_eqx(r, is_rev_strand, is_paf, ref_chrom_seq)
-        if is_paf:
-            hardclip_len = (r.query_end - r.query_length) if (is_rev_strand) else r.query_start
-        #print(hardclip_len, aligned_pairs[:10], aligned_pairs[-10:])
-        all_pairs = [p for p in aligned_pairs if (
-            (p[3] is not None) and (p[3] >= locus_pos_buffered) and (p[3] <= locus_end_buffered)
-        )]  # ctg, ref pairs where ref. is within the locus range
-        if not all_pairs:
-            continue
-        all_ref = [z[3] for z in all_pairs]
-        all_ctg = [z[4] for z in all_pairs if z[4] is not None]
-        #if locus_pos in all_ref and locus_end in all_ref:  # locus contained in contig
-        # first and last contig coord in locus + buffer
-        ctg_start = all_ctg[0]
-        ctg_end = all_ctg[-1]
-        #print(r.reference_name, r.qname, r.cigarstring[:15], r.cigarstring[-15:],  r.flag, r.pos, r.query_alignment_start, ctg_start, ctg_end, all_ref[0], all_ref[-1], len(r.query_alignment_sequence))
-        if is_rev_strand:
-            print(f"{r.query_name}/rc\t{r.query_length - ctg_end - 1 + hardclip_len}\t{r.query_length - ctg_start + hardclip_len}")
+  with open(gene_region_bed) as f_reg:
+    for reg in f_reg:
+        reg = reg.strip().split('\t')
+        if len(reg) > 3:
+            chrom, locus_pos, locus_end, locus_name = reg
         else:
-            print(f"{r.query_name}\t{ctg_start + hardclip_len}\t{ctg_end + hardclip_len}")
+            locus_name = None
+            chrom, locus_pos, locus_end = reg
+        locus_pos = int(locus_pos)
+        locus_end = int(locus_end)
+        locus_pos_buffered = locus_pos - locus_buffer
+        locus_end_buffered = locus_end + locus_buffer
+
+        ref_chrom_seq = None
+        if ref_chrom_seq_fname:
+            with open(ref_chrom_seq_fname) as f:
+                ref_chrom_seq = ''.join([z.strip() for z in f.readlines() if not z.startswith('>')]).upper()
+
+        is_paf = False
+        if in_aln.endswith('.bam') or in_aln.endswith('.cram'):
+            s = pysam.AlignmentFile(in_aln, "rb")
+            rec_iter = s.fetch(reference=chrom, start=locus_pos_buffered, end=locus_end_buffered)
+        else:
+            assert in_aln.endswith('.paf')
+            rec_iter = open(in_aln) 
+            is_paf = True
+
+        for r in rec_iter:
+            if is_paf:
+                line = r.strip().split('\t')
+                # make sure overlaps locus
+                if (line[5] != chrom) or (int(line[8]) < locus_pos) or (int(line[7]) > locus_end):
+                    continue
+                cigar_cols = [z for z in line if z.startswith('cg:Z:')]
+                assert(len(cigar_cols)) == 1
+                cigar_col = cigar_cols[0]
+                r = AlignRec(
+                    line[0], int(line[1]), int(line[2]), int(line[3]), line[4], line[5], int(line[7]),
+                    [(CIGAR_OPS[op], int(length)) for length, op in re.findall(r'(\d+)([MIDNSHP=XB])', cigar_col.replace('cg:Z:', ''))]
+                )
+            is_rev_strand = r.strand == '-' if (is_paf) else r.flag & 0x10 != 0
+            aligned_pairs, hardclip_len = get_aligned_pairs_eqx(r, is_rev_strand, is_paf, ref_chrom_seq)
+            if is_paf:
+                hardclip_len = (r.query_end - r.query_length) if (is_rev_strand) else r.query_start
+            #print(hardclip_len, aligned_pairs[:10], aligned_pairs[-10:])
+            all_pairs = [p for p in aligned_pairs if (
+                (p[3] is not None) and (p[3] >= locus_pos_buffered) and (p[3] <= locus_end_buffered)
+            )]  # ctg, ref pairs where ref. is within the locus range
+            if not all_pairs:
+                continue
+            all_ref = [z[3] for z in all_pairs]
+            all_ctg = [z[4] for z in all_pairs if z[4] is not None]
+            if not all_ctg:
+                continue
+            #if locus_pos in all_ref and locus_end in all_ref:  # locus contained in contig
+            # first and last contig coord in locus + buffer
+            ctg_start = all_ctg[0]
+            ctg_end = all_ctg[-1]
+            #print(r.reference_name, r.qname, r.cigarstring[:15], r.cigarstring[-15:],  r.flag, r.pos, r.query_alignment_start, ctg_start, ctg_end, all_ref[0], all_ref[-1], len(r.query_alignment_sequence))
+
+            # correct contig name
+            ctg_name = r.query_name.replace('-adjusted', '')
+            if '#' in ctg_name:
+                ctg_name = ctg_name[:ctg_name.index('#')]
+            out_name = f"\t{locus_name}" if (locus_name) else ""
+            if is_rev_strand:
+                print(f"{r.query_name}/rc\t{r.query_length - ctg_end - 1 + hardclip_len}\t{r.query_length - ctg_start + hardclip_len}{out_name}")
+            else:
+                print(f"{r.query_name}\t{ctg_start + hardclip_len}\t{ctg_end + hardclip_len}{out_name}")
 
 
 def get_aligned_pairs_eqx(rec, is_rev_strand, is_paf, ref_seq=None):
