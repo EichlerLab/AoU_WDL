@@ -29,7 +29,7 @@ if [ -e "${regions_file}" ]; then
 
   while IFS=' ' read -r ctg locus; do
     if [ -n "$locus" ]; then
-      sed -i "s|${ctg}|${locus}_${ctg}|g" "${out_file}"
+      sed -i "s|${ctg}|${locus}\|${ctg}|g" "${out_file}"
     fi
   done < "${regions_file}"
 
