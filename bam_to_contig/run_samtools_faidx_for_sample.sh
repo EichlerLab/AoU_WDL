@@ -14,7 +14,8 @@ if [ -e "${regions_file}" ]; then
   fi
 
   sed 's/\/rc//g' "${regions_file}" | sed 's/ .*$//' > "regions_file_no_rc.txt"
-  sed -i 's/#.*//' "${temp_fasta}"
+  # delete portion of contig name after # - can cause error in some cases
+  #sed -i 's/#.*//' "${temp_fasta}"
 
   > "${out_file}"  # empty the output file first
   while read -r region; do
