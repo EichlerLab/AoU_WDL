@@ -5,7 +5,7 @@ workflow bam_to_contig {
     File bam_to_contig_bash_script
     File make_contig_bed_script
     File ordered_sample_names_w_hap
-    File ordered_bams
+    File ordered_bams_or_pafs
     File ordered_bais
     File ordered_haplotig_fastas
     File regions_bed
@@ -14,12 +14,12 @@ workflow bam_to_contig {
     File concat_contigs_script
   }
   meta{
-      workflow_description: "Converts bam to original haplotigs in reference genome region."
+      workflow_description: "Extracts contig sequence aligning to genomic locus from bam or paf."
   }
 
   Array[String] haps = ["hap1", "hap2"]
   Array[File] input_sample_names_w_hap = read_lines(ordered_sample_names_w_hap)
-  Array[File] input_bams = read_lines(ordered_bams)
+  Array[File] input_bams = read_lines(ordered_bams_or_pafs)
   Array[File] input_bais = read_lines(ordered_bais)
   Array[File] input_haplotig_fastas = read_lines(ordered_haplotig_fastas)
 
