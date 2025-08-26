@@ -71,6 +71,7 @@ def get_first_last_contig_coords(rec, is_rev_strand, is_paf, locus_start, locus_
     query_length = rec.query_length if (is_paf) else len(query_seq)
     query_pos = 0
     hardclip_len = 0
+    is_begin_hardclip = True
     
     first_ctg_coord = None
     last_ctg_coord = None
@@ -113,12 +114,13 @@ def get_first_last_contig_coords(rec, is_rev_strand, is_paf, locus_start, locus_
             query_pos += length
             
         elif op_char == pysam.CHARD_CLIP:
-            # Hard clip: nothing advances
-            if hardclip_len == 0 or is_rev_strand:
+            # Consider relevant hard clip at beginning or end
+            if (is_begin_hardclip and (not is_rev_strand)) or ((not is_begin_hardclip) and is_rev_strand):
                 hardclip_len = length
         else:
             raise ValueError(f'Unrecognized CIGAR operation {op_char}')
-            
+        is_begin_hardclip = False
+
     return first_ctg_coord, last_ctg_coord, hardclip_len
 
 
