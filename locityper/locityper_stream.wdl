@@ -177,7 +177,7 @@ task LocityperPreprocessAndGenotype {
 
         cp ~{bed} new.bed
         echo -e "chr17\t72062001\t76562000" >> new.bed
-        awk '{print $1 "\t" $2+5000 "\t" $3-5000 "\t" $4}' new.bed > extended.bed
+        awk '{print $1 "\t" $2-5000 "\t" $3+5000 "\t" $4}' new.bed > extended.bed
         export GCS_OAUTH_TOKEN=$(gcloud auth print-access-token)
         samtools view -h -T reference.fa --regions-file extended.bed -b -o subset.bam -X ~{cram} full.cram.crai 
         samtools index subset.bam
