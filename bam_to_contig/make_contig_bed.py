@@ -51,6 +51,10 @@ def main():
                         [(CIGAR_OPS[op], int(length)) for length, op in re.findall(r'(\d+)([MIDNSHP=XB])',
                                                                                    cigar_col.replace('cg:Z:', ''))]
                     )
+                else:
+                    # Filter out contigs partially covering locus
+                    if r.reference_start > locus_pos or r.reference_end < locus_end:
+                        continue
                 is_rev_strand = r.strand == '-' if (is_paf) else (r.flag & 0x10 != 0)
 
                 first_ctg_coord, last_ctg_coord, hardclip_len = get_first_last_contig_coords(r, is_rev_strand, is_paf, locus_start_buf, locus_end_buf)
