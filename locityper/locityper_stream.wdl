@@ -13,29 +13,23 @@ workflow ValidateVariants {
         File counts_jf
         File bed
 
-        File? sample_map
-
         File locityper_db_tar_gz
 
         Int locityper_n_cpu = 32
-        Int locityper_max_gts = 100000
-    }
+        Int window_grab = 10000
+        Int locityper_extra_mem_gb = 6
+        Int n_preemptible = 2
 
-    # call GunzipReference { input: ref_gz = ref_fa_with_alt }
+        Int max_retry = 5
+        Int wait_time = 30
 
-    if (defined(sample_map)) {
-        call SubsetBed {
-            input:
-                bed = bed,
-                sample_map = select_first([sample_map]),
-                sample_id = sample_id
-        }
+        Int N_split = 200
     }
 
     call SplitBed {
         input:
-            bed = select_first([SubsetBed.subset_bed, bed]),
-            N = 2000
+            bed = bed,
+            N = N_split
     }
 
     scatter (split_bed in SplitBed.split_beds) {
@@ -50,7 +44,11 @@ workflow ValidateVariants {
                 counts_file = counts_jf,
                 bed = split_bed,
                 locityper_n_cpu = locityper_n_cpu,
-                locityper_max_gts = locityper_max_gts
+                window_grab = window_grab,
+                locityper_extra_mem_gb = locityper_extra_mem_gb,
+                n_preemptible = n_preemptible,
+                max_retry = max_retry,
+                wait_time = wait_time
         }
     }
 
@@ -153,8 +151,15 @@ task LocityperPreprocessAndGenotype {
 
         File bed
 
+        Int window_grab
+
         Int locityper_n_cpu
-        Int locityper_max_gts
+
+        Int locityper_extra_mem_gb
+        Int n_preemptible = 2
+
+        Int max_retry
+        Int wait_time
     }
 
     parameter_meta {
@@ -162,13 +167,13 @@ task LocityperPreprocessAndGenotype {
     }
 
     Int disk_size = 1 + 4*ceil(size([cram, crai, counts_file, reference, reference_index, db_targz, bed], "GiB"))
-    Int locityper_mem_gb = ceil(4.0 * locityper_n_cpu)
+    Int locityper_mem_gb = ceil(4.0 * locityper_n_cpu) + locityper_extra_mem_gb
 
     String output_tar = sample_id + ".locityper.tar.gz"
 
     command <<<
         set -euxo pipefail
-
+        date
         mv ~{reference} reference.fa
         mv ~{reference_index} reference.fa.fai
         mv ~{crai} full.cram.crai
@@ -177,12 +182,26 @@ task LocityperPreprocessAndGenotype {
 
         cp ~{bed} new.bed
         echo -e "chr17\t72062001\t76562000" >> new.bed
-        awk '{print $1 "\t" $2-5000 "\t" $3+5000 "\t" $4}' new.bed > extended.bed
+        awk -v wgrab="~{window_grab}" '{print $1 "\t" $2 - wgrab "\t" $3 + wgrab "\t" $4}' new.bed > extended.bed
         export GCS_OAUTH_TOKEN=$(gcloud auth print-access-token)
-        samtools view -h -T reference.fa --regions-file extended.bed -b -o subset.bam -X ~{cram} full.cram.crai 
-        samtools index subset.bam
 
-        locityper preproc -a subset.bam \
+        MAX_RETRIES=~{max_retry}
+        CURR_RETRIES=0
+        WAIT_TIME=~{wait_time}
+        until (( CURR_RETRIES == MAX_RETRIES )) || samtools view -h -T reference.fa  --verbosity 10  --regions-file extended.bed -C -o subset.cram -X ~{cram} full.cram.crai ; do
+            echo "error: waiting: " $WAIT_TIME
+            sleep $WAIT_TIME
+            echo $(( CURR_RETRIES++ ))
+        done
+
+        if [ ! -f subset.cram ] ; then 
+            exit 1
+        fi
+
+        samtools index subset.cram
+        date
+
+        locityper preproc -a subset.cram \
             -r reference.fa \
             -j ~{counts_file} \
             -@ ~{locityper_n_cpu} \
@@ -190,7 +209,7 @@ task LocityperPreprocessAndGenotype {
             -o locityper_preproc
 
         tar -xzf ~{db_targz}
-
+        
         # Create out_dir and ensure it exists before parallel processing
         mkdir -p out_dir
         mkdir -p out_dir/loci
@@ -203,24 +222,26 @@ task LocityperPreprocessAndGenotype {
             # Ensure the locus-specific directory exists
             mkdir -p "out_dir/loci/${locus_name}"
             
-            locityper genotype -a subset.bam \
+            locityper genotype -a subset.cram \
                 -r reference.fa \
                 -d vcf_db \
                 -p locityper_preproc \
                 --subset-loci "${locus_name}" \
                 -o out_dir
+            
+            echo "Done Processing locus: ${locus_name}"
         }
         export -f process_single_locus
 
         cat ~{bed} | /usr/bin/parallel --line-buffer -j ~{locityper_n_cpu} process_single_locus {}
-
+        date
         find out_dir -type f -name "*.bam" -exec rm -f {} \;
         
         rm -f subset.bam
         rm -f new.bed
 
         tar -czf ~{output_tar} out_dir
-
+        date
     
     >>>
 
@@ -232,7 +253,7 @@ task LocityperPreprocessAndGenotype {
         memory: "~{locityper_mem_gb} GB"
         cpu: locityper_n_cpu
         disks: "local-disk ~{disk_size} HDD"
-        preemptible: 3
+        preemptible: n_preemptible
         docker: "docker://eichlerlab/locityper:1.4.5.0"
     }
 }
