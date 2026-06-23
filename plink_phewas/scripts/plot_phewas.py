@@ -21,6 +21,8 @@ def parse_args():
                    help="Label only Bonferroni-significant points; takes precedence over --manhattan-label-count")
     p.add_argument("--manhattan-label-count", type=int, default=15,
                    help="Number of top associations to label when --label-only-bonferroni is not set")
+    p.add_argument("--min-case-carrier-ct", type=int, default=5,
+                   help="Minimum CASE_HET_A1_CT + CASE_HOM_A1_CT to include in plot")
     return p.parse_args()
 
 
@@ -29,6 +31,9 @@ def main():
 
     df = pd.read_csv(args.phewas_results, sep="\t")
     df_plot = df.dropna(subset=["phecode_category"])
+    df_plot = df_plot[
+        (df_plot["CASE_HET_A1_CT"] + df_plot["CASE_HOM_A1_CT"]) >= args.min_case_carrier_ct
+    ]
     n_tests = len(df_plot)
     df_plot.to_csv("phewas_results_for_plot.tsv", sep="\t", index=False)
 
