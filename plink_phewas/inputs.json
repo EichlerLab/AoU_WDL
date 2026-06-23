@@ -1,0 +1,36 @@
+{
+  "PhewasAcrossSVs.geno_tsv":                    "gs://{bucket}/cromwell_input/plink_phewas/locityper_gts_for_plink_batch2.tsv",
+  "PhewasAcrossSVs.relatedness_flagged_samples": "gs://{bucket}/cromwell_input/plink_phewas/relatedness_flagged_samples.tsv",
+  "PhewasAcrossSVs.pheno_tsv":                   "gs://{bucket}/cromwell_input/plink_phewas/all_samples_phecodes_plink_formatted.tsv",
+  "PhewasAcrossSVs.covars_tsv":                  "gs://{bucket}/cromwell_input/plink_phewas/all_samples_covariates_subset_10pcs_reheader.tsv",
+  "PhewasAcrossSVs.sex_file":                    "gs://{bucket}/cromwell_input/plink_phewas/sex_file.tsv",
+  "PhewasAcrossSVs.phecode_definitions":         "gs://{bucket}/cromwell_input/plink_phewas/phecode_definitions1.2.csv",
+
+  "PhewasAcrossSVs.prep_vcfs_script":            "gs://{bucket}/cromwell_input/plink_phewas/scripts/prep_vcfs.py",
+  "PhewasAcrossSVs.format_results_script":       "gs://{bucket}/cromwell_input/plink_phewas/scripts/format_results.py",
+  "PhewasAcrossSVs.plot_phewas_script":          "gs://{bucket}/cromwell_input/plink_phewas/scripts/plot_phewas.py",
+
+  "PhewasAcrossSVs.sv_subset": "{CHR}-{POS}-{SVTYPE}-{SVLEN}",
+
+  "PhewasAcrossSVs.covar_names": [
+    "age", "SEX",
+    "principal_component_1", "principal_component_2", "principal_component_3", "principal_component_4",
+    "principal_component_5", "principal_component_6", "principal_component_7", "principal_component_8",
+    "principal_component_9", "principal_component_10"
+  ],
+  "PhewasAcrossSVs.min_genotyped_samples": 200000,
+  "PhewasAcrossSVs.plink_threads":         16,
+  "PhewasAcrossSVs.manhattan_label_count": 15,
+
+  "PhewasAcrossSVs.docker":   "eichlerlab/plink-phewas:0.1",
+
+  "PhewasAcrossSVs.prep_memory_gb":    64,
+  "PhewasAcrossSVs.prep_cpu":          4,
+  "PhewasAcrossSVs.prep_disk_gb":      150,
+  "PhewasAcrossSVs.prep_preemptible":  1,
+
+  "PhewasAcrossSVs.phewas_memory_gb":    16,
+  "PhewasAcrossSVs.phewas_cpu":          16,
+  "PhewasAcrossSVs.phewas_disk_gb":      30,
+  "PhewasAcrossSVs.phewas_preemptible":  2
+}
