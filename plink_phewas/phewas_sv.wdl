@@ -26,7 +26,7 @@ workflow PhewasAcrossSVs {
     # ── Analysis parameters ──────────────────────────────────────────────────
     # Optional comma-separated list of SV IDs to process (e.g. "chr1-100-DEL-1,chr2-200-INS-2").
     # Leave empty ("") to process all passing SVs.
-    String sv_subset = "chr1-100-DEL-1"
+    String sv_subset = ""
 
     Array[String] covar_names = [
       "age", "SEX",
