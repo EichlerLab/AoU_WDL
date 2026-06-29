@@ -37,10 +37,13 @@ workflow susieR_finemap_prep {
         ## susieR: maximum number of causal signals per locus (L=10 is standard for GWAS)
         Int susie_L = 10
 
+        ## GCP project for requester-pays GCS access (needed by PrepMergedPgen)
+        String google_project
+
         ## Resources — PrepVcfs needs more memory (full geno TSV in RAM)
-        Int    prep_cpu        = 1
-        Int    prep_memory_gb  = 32
-        Int    prep_disk_gb    = 50
+        Int    prep_cpu         = 1
+        Int    prep_memory_gb   = 32
+        Int    prep_disk_gb     = 50
         Int    prep_preemptible = 1
 
         Int    cpu         = 2
@@ -73,15 +76,16 @@ workflow susieR_finemap_prep {
 
         call PrepMergedPgen {
             input:
-                sv_id     = sv_id,
-                sv_gt_vcf = sv_gt_vcf,
-                flank_bp  = flank_bp,
-                min_ac    = min_ac,
-                cpu       = cpu,
-                memory_gb = memory_gb,
-                docker    = docker,
-                disk_gb   = disk_gb,
-                preemptible = preemptible
+                sv_id          = sv_id,
+                sv_gt_vcf      = sv_gt_vcf,
+                google_project = google_project,
+                flank_bp       = flank_bp,
+                min_ac         = min_ac,
+                cpu            = cpu,
+                memory_gb      = memory_gb,
+                docker         = docker,
+                disk_gb        = disk_gb,
+                preemptible    = preemptible
         }
 
         call RunAssociation {
@@ -201,6 +205,7 @@ task PrepMergedPgen {
     input {
         String sv_id
         File   sv_gt_vcf   # per-SV VCF from PrepVcfs
+        String google_project
         Int    flank_bp
         Int    min_ac
         Int    cpu
@@ -216,6 +221,7 @@ task PrepMergedPgen {
         sv="~{sv_id}"
 
         export GCS_OAUTH_TOKEN=$(gcloud auth print-access-token)
+        export GCS_REQUESTER_PAYS_PROJECT="~{google_project}"
 
         ## Extract sample list from VCF header for bcftools -S
         bcftools query -l "~{sv_gt_vcf}" > "${sv}_samples.txt"
