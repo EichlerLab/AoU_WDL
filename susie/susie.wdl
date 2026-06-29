@@ -155,8 +155,7 @@ task PrepVcfs {
             --sv-subset                   "$sv_subset" \
             --min-genotyped-samples       0 \
             --output-dir                  . \
-            --sv-list-out                 sv_list.txt \
-            --sv-metadata-out             sv_metadata.tsv
+            --sv-list-out                 sv_list.txt
 
         ## Write sv_ids and phenotypes in alphabetical order (matching glob("*_GT.vcf"))
         python3 - <<'PYEOF'
