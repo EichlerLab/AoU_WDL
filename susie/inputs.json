@@ -1,0 +1,21 @@
+{
+  "susieR_finemap_prep.bonferroni_hits_tsv": "gs://${bucket}/cromwell_input/susie/associations.tsv",
+
+  "susieR_finemap_prep.sv_geno_tsv":                 "gs://${bucket}/cromwell_input/plink_phewas/locityper_gts_for_plink.tsv",
+  "susieR_finemap_prep.prep_vcfs_script":            "gs://${bucket}/cromwell_input/plink_phewas/scripts/prep_vcfs.py",
+  "susieR_finemap_prep.relatedness_flagged_samples": "gs://${bucket}/cromwell_input/plink_phewas/relatedness_flagged_samples.tsv",
+
+  "susieR_finemap_prep.phenotype_file": "gs://${bucket}/cromwell_input/plink_phewas/all_samples_phecodes_plink_formatted.tsv",
+  "susieR_finemap_prep.covariate_file": "gs://${bucket}/cromwell_input/plink_phewas/all_samples_covariates_subset_10pcs_reheader.tsv",
+
+  "susieR_finemap_prep.covar_names": "age,SEX,principal_component_1,principal_component_2,principal_component_3,principal_component_4,principal_component_5,principal_component_6,principal_component_7,principal_component_8,principal_component_9,principal_component_10",
+
+  "susieR_finemap_prep.flank_bp":  100000,
+  "susieR_finemap_prep.min_ac":    10,
+
+  "susieR_finemap_prep.docker":      "eichlerlab/plink-phewas:0.2",
+  "susieR_finemap_prep.cpu":         2,
+  "susieR_finemap_prep.memory_gb":   32,
+  "susieR_finemap_prep.disk_gb":     50,
+  "susieR_finemap_prep.preemptible": 1
+}
