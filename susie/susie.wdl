@@ -11,15 +11,18 @@ version 1.0
 
 workflow susieR_finemap_prep {
     input {
-        ## TSV of significant SV–phenotype pairs (no header): sv_id <TAB> phenotype
-        File bonferroni_hits_tsv
+        ## Pre-computed per-SV VCFs — if provided, PrepVcfs is skipped entirely.
+        ## Arrays must be parallel and match the output order of PrepVcfs.
+        Array[File]?   precomputed_vcf_files
+        Array[String]? precomputed_sv_ids
+        Array[String]? precomputed_phenotypes
 
-        ## Long-format genotype TSV (header: SVID\tSample\tGT)
-        File sv_geno_tsv
-
-        ## Scripts + supporting files reused from the phewas pipeline
-        File prep_vcfs_script
-        File relatedness_flagged_samples
+        ## PrepVcfs inputs — bonferroni_hits_tsv always required; others only needed
+        ## when precomputed VCFs are not supplied
+        File  bonferroni_hits_tsv
+        File? sv_geno_tsv
+        File? prep_vcfs_script
+        File? relatedness_flagged_samples
 
         ## Phenotype + covariate tables
         File phenotype_file
@@ -35,7 +38,15 @@ workflow susieR_finemap_prep {
         Int min_ac = 10
 
         ## susieR: maximum number of causal signals per locus (L=10 is standard for GWAS)
-        Int susie_L = 10
+        Int   susie_L        = 10
+        ## susieR: credible set coverage
+        Float susie_coverage = 0.95
+
+        ## Per-SV finemap inputs for RunSusie (parallel to PrepVcfs.sv_ids order)
+        ## pheno_tsv_files[i] → all ${sv_id}_${phecode}_pheno.tsv files for SV i
+        ## geno_tsv_files[i]  → all ${sv_id}_${phecode}_geno.tsv  files for SV i
+        Array[Array[File]]  pheno_tsv_files
+        Array[Array[File]]  geno_tsv_files
 
         ## GCP project for requester-pays GCS access (needed by PrepMergedPgen)
         String google_project
@@ -53,26 +64,32 @@ workflow susieR_finemap_prep {
         Int    preemptible = 1
     }
 
-    ## ── Step 1: split geno TSV into per-SV VCFs (single task) ───────────────
-    call PrepVcfs {
-        input:
-            bonferroni_hits_tsv        = bonferroni_hits_tsv,
-            sv_geno_tsv                = sv_geno_tsv,
-            prep_vcfs_script           = prep_vcfs_script,
-            relatedness_flagged_samples = relatedness_flagged_samples,
-            phenotype_file             = phenotype_file,
-            cpu                        = prep_cpu,
-            memory_gb                  = prep_memory_gb,
-            docker                     = docker,
-            disk_gb                    = prep_disk_gb,
-            preemptible                = prep_preemptible
+    ## ── Step 1: split geno TSV into per-SV VCFs (skipped if precomputed supplied) ──
+    if (!defined(precomputed_vcf_files)) {
+        call PrepVcfs {
+            input:
+                bonferroni_hits_tsv         = select_first([bonferroni_hits_tsv]),
+                sv_geno_tsv                 = select_first([sv_geno_tsv]),
+                prep_vcfs_script            = select_first([prep_vcfs_script]),
+                relatedness_flagged_samples = select_first([relatedness_flagged_samples]),
+                phenotype_file              = phenotype_file,
+                cpu                         = prep_cpu,
+                memory_gb                   = prep_memory_gb,
+                docker                      = docker,
+                disk_gb                     = prep_disk_gb,
+                preemptible                 = prep_preemptible
+        }
     }
 
+    Array[File]   vcf_files  = select_first([precomputed_vcf_files,  PrepVcfs.vcf_files])
+    Array[String] sv_ids     = select_first([precomputed_sv_ids,     PrepVcfs.sv_ids])
+    Array[String] phenotypes = select_first([precomputed_phenotypes, PrepVcfs.phenotypes])
+
     ## ── Step 2–4: per-SV scatter ─────────────────────────────────────────────
-    scatter (i in range(length(PrepVcfs.vcf_files))) {
-        File   sv_gt_vcf = PrepVcfs.vcf_files[i]
-        String sv_id     = PrepVcfs.sv_ids[i]
-        String phenotype = PrepVcfs.phenotypes[i]
+    scatter (i in range(length(vcf_files))) {
+        File   sv_gt_vcf = vcf_files[i]
+        String sv_id     = sv_ids[i]
+        String phenotype = phenotypes[i]
 
         call PrepMergedPgen {
             input:
@@ -107,25 +124,25 @@ workflow susieR_finemap_prep {
 
         call RunSusie {
             input:
-                sv_id       = sv_id,
-                merged_pgen = PrepMergedPgen.merged_pgen,
-                merged_pvar = PrepMergedPgen.merged_pvar,
-                merged_psam = PrepMergedPgen.merged_psam,
-                assoc_tsv   = RunAssociation.assoc_results,
-                susie_L     = susie_L,
-                cpu         = cpu,
-                memory_gb   = memory_gb,
-                docker      = docker,
-                disk_gb     = disk_gb,
-                preemptible = preemptible
+                sv_id           = sv_id,
+                pheno_tsv_files = pheno_tsv_files[i],
+                geno_tsv_files    = geno_tsv_files[i],
+                covariate_file    = covariate_file,
+                covar_names       = covar_names,
+                susie_L           = susie_L,
+                susie_coverage    = susie_coverage,
+                cpu               = cpu,
+                memory_gb         = memory_gb,
+                docker            = docker,
+                disk_gb           = disk_gb,
+                preemptible       = preemptible
         }
     }
 
     output {
         Array[File] snp_tsv       = PrepMergedPgen.snp_tsv
         Array[File] assoc_results = RunAssociation.assoc_results
-        Array[File] susie_pips    = RunSusie.susie_pips
-        Array[File] susie_cs      = RunSusie.susie_cs
+        Array[File] susie_out     = RunSusie.susie_out
     }
 }
 
@@ -341,97 +358,99 @@ task RunAssociation {
 # ---------------------------------------------------------------------------
 task RunSusie {
     input {
-        String sv_id
-        File   merged_pgen
-        File   merged_pvar
-        File   merged_psam
-        File   assoc_tsv
-        Int    susie_L
-        Int    cpu
-        Int    memory_gb
-        String docker
-        Int    disk_gb
-        Int    preemptible
+        String      sv_id
+        Array[File] pheno_tsv_files   # ${sv_id}_${phecode}_pheno.tsv, one per phecode
+        Array[File] geno_tsv_files    # ${sv_id}_${phecode}_geno.tsv,  one per phecode
+        File        covariate_file
+        String      covar_names = "age,SEX,principal_component_1,principal_component_2,principal_component_3,principal_component_4,principal_component_5,principal_component_6,principal_component_7,principal_component_8,principal_component_9,principal_component_10"
+        Int         susie_L
+        Float       susie_coverage
+        Int         cpu
+        Int         memory_gb
+        String      docker
+        Int         disk_gb
+        Int         preemptible
     }
 
     command <<<
         set -euo pipefail
 
-        ln -sf "~{merged_pgen}" merged.pgen
-        ln -sf "~{merged_pvar}" merged.pvar
-        ln -sf "~{merged_psam}" merged.psam
+        ## Localize all pheno/geno TSVs under plink_ld/ using their original basenames
+        mkdir -p plink_ld
+        for f in ~{sep=' ' pheno_tsv_files} ~{sep=' ' geno_tsv_files}; do
+            ln -sf "$f" "plink_ld/$(basename "$f")"
+        done
 
         Rscript - <<'REOF'
-        library(pgenlibr)
+        library(data.table)
         library(susieR)
 
-        sv <- "~{sv_id}"
+        sv         <- "~{sv_id}"
+        covar_vec  <- strsplit("~{covar_names}", ",")[[1]]
+        covar_dat  <- fread("~{covariate_file}", stringsAsFactors = FALSE)
 
-        ## ── 1. Compute in-sample LD correlation matrix from merged pgen ───
-        pvar        <- NewPvar("merged.pvar")
-        pgen        <- NewPgen("merged.pgen", pvar = pvar)
-        n_variants  <- GetVariantCt(pvar)
-        variant_ids <- sapply(seq_len(n_variants), function(i) GetVariantId(pvar, i))
+        pheno_files <- list.files("plink_ld", pattern = paste0("^", sv, "_.+_pheno\\.tsv$"),
+                                  full.names = TRUE)
 
-        X <- ReadList(pgen, variant_subset = seq_len(n_variants), meanimpute = TRUE)
-        R <- cor(X)
-        rownames(R) <- colnames(R) <- variant_ids
+        susie_results <- list()
 
-        ## ── 2. Parse z-scores and sample size from plink2 Firth output ────
-        ## Columns: #CHROM POS ID REF ALT A1 TEST OBS_CT BETA SE T_STAT P
-        assoc <- read.table("~{assoc_tsv}", header = TRUE, sep = "\t",
-                            comment.char = "", check.names = FALSE, na.strings = "NA")
-        colnames(assoc)[1] <- "CHROM"
-        assoc <- assoc[!is.na(assoc$BETA) & !is.na(assoc$SE), ]
+        for (pheno_path in pheno_files) {
 
-        n <- as.integer(median(assoc$OBS_CT))
-        z <- setNames(assoc$BETA / assoc$SE, assoc$ID)
+            ## Extract phecode from filename: {sv_id}_{phecode}_pheno.tsv
+            phecode   <- sub(paste0("^", sv, "_(.+)_pheno\\.tsv$"), "\\1", basename(pheno_path))
+            geno_path <- file.path("plink_ld", paste0(sv, "_", phecode, "_geno.tsv"))
 
-        ## ── 3. Align variant order between LD matrix and z-scores ─────────
-        shared <- intersect(variant_ids, names(z))
-        R <- R[shared, shared]
-        z <- z[shared]
+            if (!file.exists(geno_path)) next
 
-        ## ── 4. Run susie_rss ──────────────────────────────────────────────
-        fit <- susie_rss(z = z, R = R, n = n,
-                         L = ~{susie_L},
-                         estimate_residual_variance = TRUE)
+            pheno_dat <- fread(pheno_path, stringsAsFactors = FALSE)
+            geno_dat  <- fread(geno_path,  stringsAsFactors = FALSE)
 
-        ## ── 5. Write PIPs ─────────────────────────────────────────────────
-        pip_df <- data.frame(variant_id = shared,
-                             pip        = susie_get_pip(fit),
-                             stringsAsFactors = FALSE)
-        pip_df <- pip_df[order(-pip_df$pip), ]
-        write.table(pip_df, paste0(sv, "_susie_pips.tsv"),
-                    sep = "\t", quote = FALSE, row.names = FALSE)
+            dat <- merge(pheno_dat, geno_dat, by = "IID")
+            dat <- merge(dat, covar_dat,      by = "IID")
 
-        ## ── 6. Write 95% credible sets ────────────────────────────────────
-        cs <- susie_get_cs(fit, coverage = 0.95)
-        if (length(cs$cs) > 0) {
-            cs_rows <- lapply(names(cs$cs), function(nm) {
-                idx <- cs$cs[[nm]]
-                data.frame(cs_id      = nm,
-                           variant_id = shared[idx],
-                           pip        = susie_get_pip(fit)[idx],
-                           stringsAsFactors = FALSE)
-            })
-            cs_df <- do.call(rbind, cs_rows)
-        } else {
-            cs_df <- data.frame(cs_id      = character(0),
-                                variant_id = character(0),
-                                pip        = numeric(0))
+            ## Genotype columns = everything not IID, the phecode, or a covariate
+            non_geno  <- c("IID", phecode, covar_vec)
+            geno_cols <- setdiff(colnames(dat), non_geno)
+            X           <- scale(as.matrix(dat[, geno_cols, with = FALSE]))
+            variant_ids <- colnames(X)
+
+            null_formula <- as.formula(paste(phecode, "~", paste(covar_vec, collapse = " + ")))
+            null <- glm(null_formula, family = binomial, data = dat)
+            y    <- residuals(null, type = "response")
+
+            fit <- susie(X, y, L = ~{susie_L}, coverage = ~{susie_coverage})
+
+            if (length(fit$sets$cs) == 0) next
+
+            ## Keep result only if the target SV appears in any credible set
+            sv_in_cs <- any(sapply(fit$sets$cs, function(cs_idx) sv %in% variant_ids[cs_idx]))
+            if (!sv_in_cs) next
+
+            cs_table <- do.call(rbind,
+                lapply(seq_along(fit$sets$cs), function(j) {
+                    idx <- fit$sets$cs[[j]]
+                    data.frame(
+                        CS       = j,
+                        Variant  = variant_ids[idx],
+                        PIP      = fit$pip[idx],
+                        Coverage = fit$sets$coverage[j],
+                        stringsAsFactors = FALSE
+                    )
+                })
+            )
+            cs_table$phecode   <- phecode
+            cs_table$target_sv <- sv
+            susie_results[[length(susie_results) + 1]] <- cs_table
         }
-        write.table(cs_df, paste0(sv, "_susie_cs.tsv"),
-                    sep = "\t", quote = FALSE, row.names = FALSE)
 
-        cat(sprintf("susieR done: %d variants, %d credible set(s)\n",
-                    length(shared), length(cs$cs)))
+        final_df <- do.call(rbind, susie_results)
+        write.table(final_df, paste0(sv, "_susie.tsv"),
+                    sep = "\t", quote = FALSE, row.names = FALSE)
         REOF
     >>>
 
     output {
-        File susie_pips = "~{sv_id}_susie_pips.tsv"
-        File susie_cs   = "~{sv_id}_susie_cs.tsv"
+        File susie_out = "~{sv_id}_susie.tsv"
     }
 
     runtime {
