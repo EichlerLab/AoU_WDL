@@ -42,12 +42,6 @@ workflow susieR_finemap_prep {
         ## susieR: credible set coverage
         Float susie_coverage = 0.95
 
-        ## Per-SV finemap inputs for RunSusie (parallel to PrepVcfs.sv_ids order)
-        ## pheno_tsv_files[i] → all ${sv_id}_${phecode}_pheno.tsv files for SV i
-        ## geno_tsv_files[i]  → all ${sv_id}_${phecode}_geno.tsv  files for SV i
-        Array[Array[File]]  pheno_tsv_files
-        Array[Array[File]]  geno_tsv_files
-
         ## GCP project for requester-pays GCS access (needed by PrepMergedPgen)
         String google_project
 
@@ -124,17 +118,20 @@ workflow susieR_finemap_prep {
 
         call RunSusie {
             input:
-                sv_id           = sv_id,
-                pheno_tsv_files = pheno_tsv_files[i],
-                geno_tsv_files    = geno_tsv_files[i],
-                covariate_file    = covariate_file,
-                covar_names       = covar_names,
-                susie_L           = susie_L,
-                susie_coverage    = susie_coverage,
-                cpu               = cpu,
-                memory_gb         = memory_gb,
-                docker            = docker,
-                disk_gb           = disk_gb,
+                sv_id              = sv_id,
+                merged_pgen        = PrepMergedPgen.merged_pgen,
+                merged_pvar        = PrepMergedPgen.merged_pvar,
+                merged_psam        = PrepMergedPgen.merged_psam,
+                phenotype_file     = phenotype_file,
+                bonferroni_hits_tsv = bonferroni_hits_tsv,
+                covariate_file     = covariate_file,
+                covar_names        = covar_names,
+                susie_L            = susie_L,
+                susie_coverage     = susie_coverage,
+                cpu                = cpu,
+                memory_gb          = memory_gb,
+                docker             = docker,
+                disk_gb            = disk_gb,
                 preemptible       = preemptible
         }
     }
@@ -358,61 +355,73 @@ task RunAssociation {
 # ---------------------------------------------------------------------------
 task RunSusie {
     input {
-        String      sv_id
-        Array[File] pheno_tsv_files   # ${sv_id}_${phecode}_pheno.tsv, one per phecode
-        Array[File] geno_tsv_files    # ${sv_id}_${phecode}_geno.tsv,  one per phecode
-        File        covariate_file
-        String      covar_names = "age,SEX,principal_component_1,principal_component_2,principal_component_3,principal_component_4,principal_component_5,principal_component_6,principal_component_7,principal_component_8,principal_component_9,principal_component_10"
-        Int         susie_L
-        Float       susie_coverage
-        Int         cpu
-        Int         memory_gb
-        String      docker
-        Int         disk_gb
-        Int         preemptible
+        String sv_id
+        File   merged_pgen
+        File   merged_pvar
+        File   merged_psam
+        File   phenotype_file
+        File   bonferroni_hits_tsv
+        File   covariate_file
+        String covar_names = "age,SEX,principal_component_1,principal_component_2,principal_component_3,principal_component_4,principal_component_5,principal_component_6,principal_component_7,principal_component_8,principal_component_9,principal_component_10"
+        Int    susie_L
+        Float  susie_coverage
+        Int    cpu
+        Int    memory_gb
+        String docker
+        Int    disk_gb
+        Int    preemptible
     }
 
     command <<<
         set -euo pipefail
 
-        ## Localize all pheno/geno TSVs under plink_ld/ using their original basenames
-        mkdir -p plink_ld
-        for f in ~{sep=' ' pheno_tsv_files} ~{sep=' ' geno_tsv_files}; do
-            ln -sf "$f" "plink_ld/$(basename "$f")"
-        done
+        ln -sf "~{merged_pgen}" merged.pgen
+        ln -sf "~{merged_pvar}" merged.pvar
+        ln -sf "~{merged_psam}" merged.psam
 
         Rscript - <<'REOF'
+        library(pgenlibr)
         library(data.table)
         library(susieR)
 
-        sv         <- "~{sv_id}"
-        covar_vec  <- strsplit("~{covar_names}", ",")[[1]]
-        covar_dat  <- fread("~{covariate_file}", stringsAsFactors = FALSE)
+        sv        <- "~{sv_id}"
+        covar_vec <- strsplit("~{covar_names}", ",")[[1]]
 
-        pheno_files <- list.files("plink_ld", pattern = paste0("^", sv, "_.+_pheno\\.tsv$"),
-                                  full.names = TRUE)
+        ## ── 1. Read genotypes from merged pgen (SV + flanking SNPs) ──────────
+        pvar        <- NewPvar("merged.pvar")
+        pgen        <- NewPgen("merged.pgen", pvar = pvar)
+        n_variants  <- GetVariantCt(pvar)
+        variant_ids <- sapply(seq_len(n_variants), function(i) GetVariantId(pvar, i))
+        X_full      <- ReadList(pgen, variant_subset = seq_len(n_variants), meanimpute = TRUE)
+        colnames(X_full) <- variant_ids
+
+        psam        <- fread("merged.psam")
+        sample_ids  <- as.character(psam[[1]])
+
+        ## ── 2. Determine which phecodes to test for this SV ──────────────────
+        hits     <- fread("~{bonferroni_hits_tsv}", header = FALSE, sep = "\t",
+                          col.names = c("sv_id", "phecode"))
+        phecodes <- hits[sv_id == sv, phecode]
+
+        ## ── 3. Load phenotype and covariate tables ────────────────────────────
+        pheno_dat <- fread("~{phenotype_file}")
+        covar_dat <- fread("~{covariate_file}")
 
         susie_results <- list()
 
-        for (pheno_path in pheno_files) {
+        for (phecode in phecodes) {
 
-            ## Extract phecode from filename: {sv_id}_{phecode}_pheno.tsv
-            phecode   <- sub(paste0("^", sv, "_(.+)_pheno\\.tsv$"), "\\1", basename(pheno_path))
-            geno_path <- file.path("plink_ld", paste0(sv, "_", phecode, "_geno.tsv"))
+            if (!phecode %in% colnames(pheno_dat)) next
 
-            if (!file.exists(geno_path)) next
+            ## Merge pheno + covariates, align to pgen sample order
+            pheno_sub <- pheno_dat[, c("IID", phecode), with = FALSE]
+            dat       <- merge(pheno_sub, covar_dat, by = "IID")
+            dat       <- dat[!is.na(dat[[phecode]]), ]
 
-            pheno_dat <- fread(pheno_path, stringsAsFactors = FALSE)
-            geno_dat  <- fread(geno_path,  stringsAsFactors = FALSE)
+            row_idx <- match(dat$IID, sample_ids)
+            if (any(is.na(row_idx))) next
 
-            dat <- merge(pheno_dat, geno_dat, by = "IID")
-            dat <- merge(dat, covar_dat,      by = "IID")
-
-            ## Genotype columns = everything not IID, the phecode, or a covariate
-            non_geno  <- c("IID", phecode, covar_vec)
-            geno_cols <- setdiff(colnames(dat), non_geno)
-            X           <- scale(as.matrix(dat[, geno_cols, with = FALSE]))
-            variant_ids <- colnames(X)
+            X <- scale(X_full[row_idx, , drop = FALSE])
 
             null_formula <- as.formula(paste(phecode, "~", paste(covar_vec, collapse = " + ")))
             null <- glm(null_formula, family = binomial, data = dat)
@@ -422,7 +431,6 @@ task RunSusie {
 
             if (length(fit$sets$cs) == 0) next
 
-            ## Keep result only if the target SV appears in any credible set
             sv_in_cs <- any(sapply(fit$sets$cs, function(cs_idx) sv %in% variant_ids[cs_idx]))
             if (!sv_in_cs) next
 
