@@ -99,7 +99,7 @@ workflow susieR_finemap_prep {
                 preemptible    = preemptible
         }
 
-        call RunAssociation {
+        call RunSusie {
             input:
                 sv_id          = sv_id,
                 phenotype      = phenotype,
@@ -108,23 +108,6 @@ workflow susieR_finemap_prep {
                 merged_psam    = PrepMergedPgen.merged_psam,
                 phenotype_file = phenotype_file,
                 covariate_file = covariate_file,
-                covar_names    = covar_names,
-                cpu            = cpu,
-                memory_gb      = memory_gb,
-                docker         = docker,
-                disk_gb        = disk_gb,
-                preemptible    = preemptible
-        }
-
-        call RunSusie {
-            input:
-                sv_id              = sv_id,
-                merged_pgen        = PrepMergedPgen.merged_pgen,
-                merged_pvar        = PrepMergedPgen.merged_pvar,
-                merged_psam        = PrepMergedPgen.merged_psam,
-                phenotype_file     = phenotype_file,
-                bonferroni_hits_tsv = bonferroni_hits_tsv,
-                covariate_file     = covariate_file,
                 covar_names        = covar_names,
                 susie_L            = susie_L,
                 susie_coverage     = susie_coverage,
@@ -137,9 +120,8 @@ workflow susieR_finemap_prep {
     }
 
     output {
-        Array[File] snp_tsv       = PrepMergedPgen.snp_tsv
-        Array[File] assoc_results = RunAssociation.assoc_results
-        Array[File] susie_out     = RunSusie.susie_out
+        Array[File] snp_tsv   = PrepMergedPgen.snp_tsv
+        Array[File] susie_out = RunSusie.susie_out
     }
 }
 
@@ -356,11 +338,11 @@ task RunAssociation {
 task RunSusie {
     input {
         String sv_id
+        String phenotype
         File   merged_pgen
         File   merged_pvar
         File   merged_psam
         File   phenotype_file
-        File   bonferroni_hits_tsv
         File   covariate_file
         String covar_names = "age,SEX,principal_component_1,principal_component_2,principal_component_3,principal_component_4,principal_component_5,principal_component_6,principal_component_7,principal_component_8,principal_component_9,principal_component_10"
         Int    susie_L
@@ -381,10 +363,10 @@ task RunSusie {
 
         Rscript - <<'REOF'
         library(pgenlibr)
-        library(data.table)
         library(susieR)
 
         sv        <- "~{sv_id}"
+        phecode   <- "~{phenotype}"
         covar_vec <- strsplit("~{covar_names}", ",")[[1]]
 
         ## ── 1. Read genotypes from merged pgen (SV + flanking SNPs) ──────────
@@ -395,63 +377,52 @@ task RunSusie {
         X_full      <- ReadList(pgen, variant_subset = seq_len(n_variants), meanimpute = TRUE)
         colnames(X_full) <- variant_ids
 
-        psam        <- fread("merged.psam")
-        sample_ids  <- as.character(psam[[1]])
+        psam       <- read.table("merged.psam", header = TRUE, sep = "\t")
+        sample_ids <- as.character(psam[[1]])
 
-        ## ── 2. Determine which phecodes to test for this SV ──────────────────
-        hits     <- fread("~{bonferroni_hits_tsv}", header = FALSE, sep = "\t",
-                          col.names = c("sv_id", "phecode"))
-        phecodes <- hits[sv_id == sv, phecode]
+        ## ── 2. Merge phenotype + covariates, align to pgen sample order ───────
+        pheno_dat <- read.table("~{phenotype_file}", header = TRUE, sep = "\t")
+        covar_dat <- read.table("~{covariate_file}", header = TRUE, sep = "\t")
 
-        ## ── 3. Load phenotype and covariate tables ────────────────────────────
-        pheno_dat <- fread("~{phenotype_file}")
-        covar_dat <- fread("~{covariate_file}")
+        pheno_sub <- pheno_dat[, c("IID", phecode)]
+        dat       <- merge(pheno_sub, covar_dat, by = "IID")
+        dat       <- dat[!is.na(dat[[phecode]]), ]
 
-        susie_results <- list()
+        row_idx <- match(dat$IID, sample_ids)
+        X <- scale(X_full[row_idx, , drop = FALSE])
 
-        for (phecode in phecodes) {
+        ## ── 3. Null model residuals ───────────────────────────────────────────
+        null_formula <- as.formula(paste(phecode, "~", paste(covar_vec, collapse = " + ")))
+        null <- glm(null_formula, family = binomial, data = dat)
+        y    <- residuals(null, type = "response")
 
-            if (!phecode %in% colnames(pheno_dat)) next
+        ## ── 4. Run susie ──────────────────────────────────────────────────────
+        fit <- susie(X, y, L = ~{susie_L}, coverage = ~{susie_coverage})
 
-            ## Merge pheno + covariates, align to pgen sample order
-            pheno_sub <- pheno_dat[, c("IID", phecode), with = FALSE]
-            dat       <- merge(pheno_sub, covar_dat, by = "IID")
-            dat       <- dat[!is.na(dat[[phecode]]), ]
+        sv_in_cs <- length(fit$sets$cs) > 0 &&
+                    any(sapply(fit$sets$cs, function(cs_idx) sv %in% variant_ids[cs_idx]))
 
-            row_idx <- match(dat$IID, sample_ids)
-            if (any(is.na(row_idx))) next
-
-            X <- scale(X_full[row_idx, , drop = FALSE])
-
-            null_formula <- as.formula(paste(phecode, "~", paste(covar_vec, collapse = " + ")))
-            null <- glm(null_formula, family = binomial, data = dat)
-            y    <- residuals(null, type = "response")
-
-            fit <- susie(X, y, L = ~{susie_L}, coverage = ~{susie_coverage})
-
-            if (length(fit$sets$cs) == 0) next
-
-            sv_in_cs <- any(sapply(fit$sets$cs, function(cs_idx) sv %in% variant_ids[cs_idx]))
-            if (!sv_in_cs) next
-
-            cs_table <- do.call(rbind,
+        if (sv_in_cs) {
+            final_df <- do.call(rbind,
                 lapply(seq_along(fit$sets$cs), function(j) {
                     idx <- fit$sets$cs[[j]]
                     data.frame(
-                        CS       = j,
-                        Variant  = variant_ids[idx],
-                        PIP      = fit$pip[idx],
-                        Coverage = fit$sets$coverage[j],
+                        CS         = j,
+                        Variant    = variant_ids[idx],
+                        PIP        = fit$pip[idx],
+                        Coverage   = fit$sets$coverage[j],
+                        phecode    = phecode,
+                        target_sv  = sv,
                         stringsAsFactors = FALSE
                     )
                 })
             )
-            cs_table$phecode   <- phecode
-            cs_table$target_sv <- sv
-            susie_results[[length(susie_results) + 1]] <- cs_table
+        } else {
+            final_df <- data.frame(CS = integer(), Variant = character(),
+                                   PIP = numeric(), Coverage = numeric(),
+                                   phecode = character(), target_sv = character())
         }
 
-        final_df <- do.call(rbind, susie_results)
         write.table(final_df, paste0(sv, "_susie.tsv"),
                     sep = "\t", quote = FALSE, row.names = FALSE)
         REOF
