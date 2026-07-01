@@ -80,7 +80,7 @@ workflow susieR_finemap_prep {
     scatter (i in range(length(vcf_files))) {
         File   sv_gt_vcf = vcf_files[i]
         String sv_id     = basename(sv_gt_vcf, "_GT.vcf")
-        String phenotype = phenotypes[i]
+        String phenotype = sub(phenotypes[i], "^\\s+|\\s+$", "")
 
         call PrepMergedPgen {
             input:
@@ -335,6 +335,16 @@ task RunSusie {
         ## ── 2. Merge phenotype + covariates, align to pgen sample order ───────
         pheno_dat <- read_plink_table("~{phenotype_file}")
         covar_dat <- read_plink_table("~{covariate_file}")
+
+        missing_cols <- setdiff(c("IID", phecode), colnames(pheno_dat))
+        if (length(missing_cols) > 0) {
+            stop(sprintf(
+                "phenotype_file is missing expected column(s): %s\nphecode requested: [%s]\ncolumns found: %s",
+                paste(missing_cols, collapse = ", "),
+                phecode,
+                paste(sprintf("[%s]", colnames(pheno_dat)), collapse = ", ")
+            ))
+        }
 
         pheno_sub <- pheno_dat[, c("IID", phecode)]
         dat       <- merge(pheno_sub, covar_dat, by = "IID")
