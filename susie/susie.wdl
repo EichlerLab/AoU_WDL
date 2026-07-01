@@ -14,7 +14,6 @@ workflow susieR_finemap_prep {
         ## Pre-computed per-SV VCFs — if provided, PrepVcfs is skipped entirely.
         ## Arrays must be parallel and match the output order of PrepVcfs.
         Array[File]?   precomputed_vcf_files
-        Array[String]? precomputed_sv_ids
         Array[String]? precomputed_phenotypes
 
         ## PrepVcfs inputs — bonferroni_hits_tsv always required; others only needed
@@ -76,13 +75,12 @@ workflow susieR_finemap_prep {
     }
 
     Array[File]   vcf_files  = select_first([precomputed_vcf_files,  PrepVcfs.vcf_files])
-    Array[String] sv_ids     = select_first([precomputed_sv_ids,     PrepVcfs.sv_ids])
     Array[String] phenotypes = select_first([precomputed_phenotypes, PrepVcfs.phenotypes])
 
     ## ── Step 2–4: per-SV scatter ─────────────────────────────────────────────
     scatter (i in range(length(vcf_files))) {
         File   sv_gt_vcf = vcf_files[i]
-        String sv_id     = sv_ids[i]
+        String sv_id     = basename(sv_gt_vcf, "_GT.vcf")
         String phenotype = phenotypes[i]
 
         call PrepMergedPgen {
@@ -180,10 +178,9 @@ PYEOF
     >>>
 
     output {
-        ## glob returns files in alphabetical order; sv_ids/phenotypes are written
-        ## in the same alphabetical order so the three arrays are aligned.
+        ## glob returns files in alphabetical order; phenotypes are written
+        ## in the same alphabetical order so the two arrays are aligned.
         Array[File]   vcf_files  = glob("*_GT.vcf")
-        Array[String] sv_ids     = read_lines("sv_ids_ordered.txt")
         Array[String] phenotypes = read_lines("phenotypes_ordered.txt")
     }
 
