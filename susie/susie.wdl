@@ -11,9 +11,10 @@ version 1.0
 workflow susieR_finemap_prep {
     input {
         ## Pre-computed per-SV VCFs — if provided, PrepVcfs is skipped entirely.
-        ## Arrays must be parallel and match the output order of PrepVcfs.
-        Array[File]?   precomputed_vcf_files
-        Array[String]? precomputed_phenotypes
+        ## precomputed_vcf_files must be parallel to and match the line order of
+        ## precomputed_phenotypes_file (one phenotype per line, no header).
+        Array[File]? precomputed_vcf_files
+        File?        precomputed_phenotypes_file
 
         ## PrepVcfs inputs — bonferroni_hits_tsv always required; others only needed
         ## when precomputed VCFs are not supplied
@@ -71,6 +72,10 @@ workflow susieR_finemap_prep {
                 disk_gb                     = prep_disk_gb,
                 preemptible                 = prep_preemptible
         }
+    }
+
+    if (defined(precomputed_phenotypes_file)) {
+        Array[String] precomputed_phenotypes = read_lines(select_first([precomputed_phenotypes_file]))
     }
 
     Array[File]   vcf_files  = select_first([precomputed_vcf_files,  PrepVcfs.vcf_files])
@@ -350,6 +355,14 @@ task RunSusie {
         dat       <- merge(pheno_sub, covar_dat, by = "IID")
         dat       <- dat[!is.na(dat[[phecode]]), ]
 
+        ## phecode columns use the standard 1 = control / 2 = case coding —
+        ## recode to 0/1 for glm(family = binomial).
+        dat[[phecode]] <- dat[[phecode]] - 1
+
+        ## Restrict to samples that actually have genotype data before indexing,
+        ## otherwise unmatched IIDs introduce NA rows into X.
+        dat <- dat[dat$IID %in% sample_ids, ]
+
         row_idx <- match(dat$IID, sample_ids)
         X <- scale(X_full[row_idx, , drop = FALSE])
 
@@ -361,29 +374,31 @@ task RunSusie {
         ## ── 4. Run susie ──────────────────────────────────────────────────────
         fit <- susie(X, y, L = ~{susie_L}, coverage = ~{susie_coverage})
 
-        sv_in_cs <- length(fit$sets$cs) > 0 &&
-                    any(sapply(fit$sets$cs, function(cs_idx) sv %in% variant_ids[cs_idx]))
+        message(sprintf(
+            "susie found %d credible set(s); target SV '%s' %s in variant_ids (n_variants=%d, max_pip=%.4g)",
+            length(fit$sets$cs), sv,
+            ifelse(sv %in% variant_ids, "IS present", "is NOT present"),
+            n_variants, max(fit$pip)
+        ))
 
-        if (sv_in_cs) {
-            final_df <- do.call(rbind,
-                lapply(seq_along(fit$sets$cs), function(j) {
-                    idx <- fit$sets$cs[[j]]
-                    data.frame(
-                        CS         = j,
-                        Variant    = variant_ids[idx],
-                        PIP        = fit$pip[idx],
-                        Coverage   = fit$sets$coverage[j],
-                        phecode    = phecode,
-                        target_sv  = sv,
-                        stringsAsFactors = FALSE
-                    )
-                })
-            )
-        } else {
-            final_df <- data.frame(CS = integer(), Variant = character(),
-                                   PIP = numeric(), Coverage = numeric(),
-                                   phecode = character(), target_sv = character())
+        ## CS: credible set number a variant belongs to (NA if none).
+        ## Lead_in_CS: TRUE for the highest-PIP variant within its own credible set.
+        cs_membership <- rep(NA_integer_, n_variants)
+        lead_in_cs    <- rep(FALSE, n_variants)
+        for (j in seq_along(fit$sets$cs)) {
+            idx <- fit$sets$cs[[j]]
+            cs_membership[idx] <- j
+            lead_in_cs[idx[which.max(fit$pip[idx])]] <- TRUE
         }
+
+        final_df <- data.frame(
+            Variant    = variant_ids,
+            PIP        = fit$pip,
+            CS         = cs_membership,
+            Lead_in_CS = lead_in_cs,
+            stringsAsFactors = FALSE
+        )
+        final_df <- final_df[order(-final_df$PIP), ]
 
         write.table(final_df, paste0(sv, "_susie.tsv"),
                     sep = "\t", quote = FALSE, row.names = FALSE)
