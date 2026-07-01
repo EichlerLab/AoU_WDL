@@ -6,8 +6,7 @@ version 1.0
 ## Workflow:
 ##   1. PrepVcfs        — single task; splits geno TSV into one VCF per SV
 ##   2. PrepMergedPgen  — scattered; fetches flanking SNPs, merges with SV GT, builds pgen
-##   3. RunAssociation  — scattered; plink2 Firth → z-scores for all variants
-##   4. RunSusie        — scattered; susie_rss(z, R, n) → PIPs + credible sets
+##   3. RunSusie        — scattered; susie(X, y) → PIPs + credible sets
 
 workflow susieR_finemap_prep {
     input {
@@ -278,60 +277,6 @@ task PrepMergedPgen {
 }
 
 # ---------------------------------------------------------------------------
-task RunAssociation {
-    input {
-        String sv_id
-        String phenotype
-        File   merged_pgen
-        File   merged_pvar
-        File   merged_psam
-        File   phenotype_file
-        File   covariate_file
-        String covar_names
-        Int    cpu
-        Int    memory_gb
-        String docker
-        Int    disk_gb
-        Int    preemptible
-    }
-
-    command <<<
-        set -euo pipefail
-
-        sv="~{sv_id}"
-
-        ln -sf "~{merged_pgen}" merged.pgen
-        ln -sf "~{merged_pvar}" merged.pvar
-        ln -sf "~{merged_psam}" merged.psam
-
-        plink2 \
-            --pfile merged \
-            --pheno "~{phenotype_file}" \
-            --pheno-name ~{phenotype} \
-            --covar "~{covariate_file}" \
-            --covar-name ~{covar_names} \
-            --covar-variance-standardize \
-            --glm firth hide-covar \
-            --threads ~{cpu} \
-            --out "${sv}"
-
-        mv "${sv}.~{phenotype}.glm.firth" "${sv}_assoc.tsv"
-    >>>
-
-    output {
-        File assoc_results = "~{sv_id}_assoc.tsv"
-    }
-
-    runtime {
-        docker:      docker
-        cpu:         cpu
-        memory:      "~{memory_gb} GB"
-        disks:       "local-disk ~{disk_gb} SSD"
-        preemptible: preemptible
-    }
-}
-
-# ---------------------------------------------------------------------------
 task RunSusie {
     input {
         String sv_id
@@ -374,12 +319,22 @@ task RunSusie {
         X_full      <- ReadList(pgen, variant_subset = seq_len(n_variants), meanimpute = TRUE)
         colnames(X_full) <- variant_ids
 
-        psam       <- read.table("merged.psam", header = TRUE, sep = "\t")
-        sample_ids <- as.character(psam[[1]])
+        ## plink2 files use a leading '#' comment char on the header line —
+        ## read.table's defaults (comment.char = "#", check.names = TRUE)
+        ## mangle it, so read manually and strip the '#'.
+        read_plink_table <- function(path) {
+            df <- read.table(path, header = TRUE, sep = "\t",
+                             comment.char = "", check.names = FALSE)
+            colnames(df)[1] <- sub("^#", "", colnames(df)[1])
+            df
+        }
+
+        psam       <- read_plink_table("merged.psam")
+        sample_ids <- as.character(psam$IID)
 
         ## ── 2. Merge phenotype + covariates, align to pgen sample order ───────
-        pheno_dat <- read.table("~{phenotype_file}", header = TRUE, sep = "\t")
-        covar_dat <- read.table("~{covariate_file}", header = TRUE, sep = "\t")
+        pheno_dat <- read_plink_table("~{phenotype_file}")
+        covar_dat <- read_plink_table("~{covariate_file}")
 
         pheno_sub <- pheno_dat[, c("IID", phecode)]
         dat       <- merge(pheno_sub, covar_dat, by = "IID")
