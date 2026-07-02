@@ -364,7 +364,8 @@ task RunSusie {
         dat <- dat[dat$IID %in% sample_ids, ]
 
         row_idx <- match(dat$IID, sample_ids)
-        X <- scale(X_full[row_idx, , drop = FALSE])
+        X_raw   <- X_full[row_idx, , drop = FALSE]
+        X       <- scale(X_raw)
 
         ## ── 3. Null model residuals ───────────────────────────────────────────
         null_formula <- as.formula(paste(phecode, "~", paste(covar_vec, collapse = " + ")))
@@ -391,11 +392,24 @@ task RunSusie {
             lead_in_cs[idx[which.max(fit$pip[idx])]] <- TRUE
         }
 
+        ## Per-variant case/control counts by carrier status (>= 1 copy of the
+        ## alt allele, rounding the mean-imputed dosage to the nearest hard call).
+        is_carrier   <- round(X_raw) >= 1
+        case_status  <- dat[[phecode]]
+        n_case_with       <- colSums(is_carrier[case_status == 1, , drop = FALSE])
+        n_case_without    <- colSums(!is_carrier[case_status == 1, , drop = FALSE])
+        n_control_with    <- colSums(is_carrier[case_status == 0, , drop = FALSE])
+        n_control_without <- colSums(!is_carrier[case_status == 0, , drop = FALSE])
+
         final_df <- data.frame(
-            Variant    = variant_ids,
-            PIP        = fit$pip,
-            CS         = cs_membership,
-            Lead_in_CS = lead_in_cs,
+            Variant           = variant_ids,
+            PIP               = fit$pip,
+            CS                = cs_membership,
+            Lead_in_CS        = lead_in_cs,
+            Cases_W_Var       = n_case_with,
+            Cases_WO_Var    = n_case_without,
+            Ctrls_W_Var    = n_control_with,
+            Ctrls_WO_Var = n_control_without,
             stringsAsFactors = FALSE
         )
         final_df <- final_df[order(-final_df$PIP), ]
