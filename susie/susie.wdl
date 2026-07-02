@@ -34,12 +34,16 @@ workflow susieR_finemap_prep {
         Int flank_bp = 100000
 
         ## Minimum AC for SNP inclusion
-        Int min_ac = 10
+        Int min_ac = 100
+
+        ## Minimum number of cases carrying a variant for it to be included in susie —
+        ## drops variants whose signal hinges on a handful of case carriers
+        Int min_case_carriers = 5
 
         ## susieR: maximum number of causal signals per locus (L=10 is standard for GWAS)
         Int   susie_L        = 10
         ## susieR: credible set coverage
-        Float susie_coverage = 0.95
+        Float susie_coverage = 0.8
 
         ## GCP project for requester-pays GCS access (needed by PrepMergedPgen)
         String google_project
@@ -50,8 +54,8 @@ workflow susieR_finemap_prep {
         Int    prep_disk_gb     = 50
         Int    prep_preemptible = 1
 
-        Int    cpu         = 2
-        Int    memory_gb   = 32
+        Int    cpu         = 8
+        Int    memory_gb   = 85
         String docker      = "eichlerlab/plink-phewas:0.2"
         Int    disk_gb     = 50
         Int    preemptible = 1
@@ -111,6 +115,7 @@ workflow susieR_finemap_prep {
                 phenotype_file = phenotype_file,
                 covariate_file = covariate_file,
                 covar_names        = covar_names,
+                min_case_carriers  = min_case_carriers,
                 susie_L            = susie_L,
                 susie_coverage     = susie_coverage,
                 cpu                = cpu,
@@ -292,6 +297,7 @@ task RunSusie {
         File   phenotype_file
         File   covariate_file
         String covar_names = "age,SEX,principal_component_1,principal_component_2,principal_component_3,principal_component_4,principal_component_5,principal_component_6,principal_component_7,principal_component_8,principal_component_9,principal_component_10"
+        Int    min_case_carriers
         Int    susie_L
         Float  susie_coverage
         Int    cpu
@@ -365,14 +371,29 @@ task RunSusie {
 
         row_idx <- match(dat$IID, sample_ids)
         X_raw   <- X_full[row_idx, , drop = FALSE]
-        X       <- scale(X_raw)
 
-        ## ── 3. Null model residuals ───────────────────────────────────────────
+        ## ── 3. Drop variants with too few case carriers ───────────────────────
+        case_status      <- dat[[phecode]]
+        is_carrier_full  <- round(X_raw) >= 1
+        n_case_with_full <- colSums(is_carrier_full[case_status == 1, , drop = FALSE])
+        keep             <- n_case_with_full >= ~{min_case_carriers}
+
+        message(sprintf(
+            "dropping %d/%d variant(s) with fewer than %d case carrier(s)",
+            sum(!keep), length(keep), ~{min_case_carriers}
+        ))
+
+        variant_ids <- variant_ids[keep]
+        X_raw       <- X_raw[, keep, drop = FALSE]
+        n_variants  <- length(variant_ids)
+        X           <- scale(X_raw)
+
+        ## ── 4. Null model residuals ───────────────────────────────────────────
         null_formula <- as.formula(paste(phecode, "~", paste(covar_vec, collapse = " + ")))
         null <- glm(null_formula, family = binomial, data = dat)
         y    <- residuals(null, type = "response")
 
-        ## ── 4. Run susie ──────────────────────────────────────────────────────
+        ## ── 5. Run susie ──────────────────────────────────────────────────────
         fit <- susie(X, y, L = ~{susie_L}, coverage = ~{susie_coverage})
 
         message(sprintf(
@@ -394,8 +415,7 @@ task RunSusie {
 
         ## Per-variant case/control counts by carrier status (>= 1 copy of the
         ## alt allele, rounding the mean-imputed dosage to the nearest hard call).
-        is_carrier   <- round(X_raw) >= 1
-        case_status  <- dat[[phecode]]
+        is_carrier        <- round(X_raw) >= 1
         n_case_with       <- colSums(is_carrier[case_status == 1, , drop = FALSE])
         n_case_without    <- colSums(!is_carrier[case_status == 1, , drop = FALSE])
         n_control_with    <- colSums(is_carrier[case_status == 0, , drop = FALSE])
