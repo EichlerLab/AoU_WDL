@@ -17,6 +17,7 @@ workflow PhewasAcrossSVs {
     File covars_tsv                   # plink2 covariates file
     File sex_file                     # plink2 sex file (FID IID SEX)
     File phecode_definitions          # phecode_definitions1.2.csv
+    File? sv_info                     # optional TSV with columns: ID, AF, gene, loc (used to title/label Manhattan plots)
 
     # ── Python helper scripts (gs:// paths or local) ─────────────────────────
     File prep_vcfs_script
@@ -80,6 +81,7 @@ workflow PhewasAcrossSVs {
         covars_tsv             = covars_tsv,
         sex_file               = sex_file,
         phecode_definitions    = phecode_definitions,
+        sv_info                = sv_info,
         format_results_script  = format_results_script,
         plot_phewas_script     = plot_phewas_script,
         covar_names            = covar_names,
@@ -165,6 +167,7 @@ task RunPhewasPerSv {
     File          covars_tsv
     File          sex_file
     File          phecode_definitions
+    File?         sv_info
     File          format_results_script
     File          plot_phewas_script
     Array[String] covar_names
@@ -244,7 +247,7 @@ task RunPhewasPerSv {
       python ~{plot_phewas_script} \
         --phewas-results plink_results_final/"${sv}_phewas_results.tsv" \
         --output         "${sv}_manhattan.png" \
-        --title          "PheWAS: ${sv}" \
+        ~{if defined(sv_info) then "--sv-info " + sv_info else ""} \
         --manhattan-label-count  ~{manhattan_label_count} \
         ~{if label_only_bonferroni then "--label-only-bonferroni" else ""}
     }

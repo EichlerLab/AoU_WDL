@@ -1,5 +1,6 @@
 {
   "PhewasAcrossSVs.geno_tsv":                    "gs://{bucket}/cromwell_input/plink_phewas/locityper_gts_for_plink_batch2.tsv",
+  "PhewasAcrossSVs.sv_info":                     "gs://{bucket}/cromwell_input/plink_phewas/batch2_SV_GT_Count_anno.tsv",
   "PhewasAcrossSVs.relatedness_flagged_samples": "gs://{bucket}/cromwell_input/plink_phewas/relatedness_flagged_samples.tsv",
   "PhewasAcrossSVs.pheno_tsv":                   "gs://{bucket}/cromwell_input/plink_phewas/all_samples_phecodes_plink_formatted.tsv",
   "PhewasAcrossSVs.covars_tsv":                  "gs://{bucket}/cromwell_input/plink_phewas/all_samples_covariates_subset_10pcs_reheader.tsv",
@@ -21,16 +22,7 @@
   "PhewasAcrossSVs.min_genotyped_samples": 200000,
   "PhewasAcrossSVs.plink_threads":         16,
   "PhewasAcrossSVs.manhattan_label_count": 15,
+  "PhewasAcrossSVs.label_only_bonferroni": true,
 
-  "PhewasAcrossSVs.docker":   "eichlerlab/plink-phewas:0.1",
-
-  "PhewasAcrossSVs.prep_memory_gb":    64,
-  "PhewasAcrossSVs.prep_cpu":          4,
-  "PhewasAcrossSVs.prep_disk_gb":      150,
-  "PhewasAcrossSVs.prep_preemptible":  1,
-
-  "PhewasAcrossSVs.phewas_memory_gb":    16,
-  "PhewasAcrossSVs.phewas_cpu":          16,
-  "PhewasAcrossSVs.phewas_disk_gb":      30,
-  "PhewasAcrossSVs.phewas_preemptible":  2
+  "PhewasAcrossSVs.docker":   "eichlerlab/plink-phewas:0.2"
 }

@@ -14,10 +14,10 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--phewas-results", required=True,
                    help="PheTK-ready TSV produced by format_results.py")
-    p.add_argument("--output", required=True,
-                   help="Output image path (e.g. my_sv_manhattan.png)")
-    p.add_argument("--title", default="Phenome-Wide Association Study",
-                   help="Plot title")
+    p.add_argument("--output", default=None,
+                   help="Output image path; defaults to {gene}_{SVID}.png or {SVID}.png")
+    p.add_argument("--sv-info", default=None,
+                   help="Optional TSV with columns: ID, AF, gene, loc")
     p.add_argument("--label-only-bonferroni", action="store_true",
                    help="Label only Bonferroni-significant points; takes precedence over --manhattan-label-count")
     p.add_argument("--manhattan-label-count", type=int, default=15,
@@ -29,6 +29,26 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    import os
+    sv_id = os.path.basename(args.phewas_results).replace("_phewas_results.tsv", "")
+
+    gene = None
+    title = sv_id
+    if args.sv_info:
+        sv_info_df = pd.read_csv(args.sv_info, sep="\t", dtype=str)
+        row = sv_info_df[sv_info_df["ID"] == sv_id]
+        if len(row) == 1:
+            gene = row.iloc[0]["gene"]
+            loc  = row.iloc[0]["loc"]
+            hom_ref = float(row.iloc[0]["0/0"])
+            het     = float(row.iloc[0]["1/0"])
+            hom_alt = float(row.iloc[0]["1/1"])
+            total   = hom_ref + het + hom_alt
+            af = f"{(het + 2 * hom_alt) / (2 * total):.4f}" if total > 0 else "NA"
+            title = f"{gene} {sv_id} ({loc}, AF={af})"
+
+    output = args.output or (f"{gene}_{sv_id}.png" if gene else f"{sv_id}.png")
 
     df = pd.read_csv(args.phewas_results, sep="\t")
 
@@ -62,6 +82,7 @@ def main():
     neg_log_bonferroni = -np.log10(bonferroni_threshold)
     # Ensure y-axis extends at least to the Bonferroni line (+ buffer)
     max_neg_log_p = df_plot["neg_log_p_value"].dropna().max()
+    max_neg_log_p = max_neg_log_p if pd.notna(max_neg_log_p) else 0
     y_limit = int(max(max_neg_log_p, neg_log_bonferroni) * 1.1) + 1
 
     if args.label_only_bonferroni:
@@ -78,14 +99,14 @@ def main():
 
     phewas_plot = Plot("phewas_results_for_plot.tsv", bonferroni=neg_log_bonferroni)
     phewas_plot.manhattan(
-        title=args.title,
+        title=title,
         label_values=label_values,
         label_count=label_count,
         y_limit=y_limit,
-        output_file_path=args.output,
+        output_file_path=output,
         save_plot=True,
     )
-    print(f"Manhattan plot written to {args.output}", flush=True)
+    print(f"Manhattan plot written to {output}", flush=True)
 
 
 if __name__ == "__main__":
