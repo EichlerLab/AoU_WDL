@@ -18,6 +18,8 @@ def parse_args():
                    help="Output image path; defaults to {gene}_{SVID}.png or {SVID}.png")
     p.add_argument("--sv-info", default=None,
                    help="Optional TSV with columns: ID, AF, gene, loc")
+    p.add_argument("--title", default=None,
+                   help="Plot title; overrides the title derived from --sv-info/SVID")
     p.add_argument("--label-only-bonferroni", action="store_true",
                    help="Label only Bonferroni-significant points; takes precedence over --manhattan-label-count")
     p.add_argument("--manhattan-label-count", type=int, default=15,
@@ -31,7 +33,8 @@ def main():
     args = parse_args()
 
     import os
-    sv_id = os.path.basename(args.phewas_results).replace("_phewas_results.tsv", "")
+    sv_id = os.path.basename(args.phewas_results)
+    sv_id = sv_id[:sv_id.rindex('.')] # strip ext
 
     gene = None
     title = sv_id
@@ -47,6 +50,9 @@ def main():
             total   = hom_ref + het + hom_alt
             af = f"{(het + 2 * hom_alt) / (2 * total):.4f}" if total > 0 else "NA"
             title = f"{gene} {sv_id} ({loc}, AF={af})"
+
+    if args.title:
+        title = args.title
 
     output = args.output or (f"{gene}_{sv_id}.png" if gene else f"{sv_id}.png")
 
