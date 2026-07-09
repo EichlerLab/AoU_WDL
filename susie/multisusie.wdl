@@ -64,7 +64,7 @@ workflow multisusie_finemap {
 
         ## Runtime -- default docker must contain: python3 + pandas/numpy/scipy/
         ## statsmodels/MultiSuSiE, bcftools, and the gcloud CLI (for GCS_OAUTH_TOKEN)
-        String docker = "eicherlab/multisusie:0.1"
+        String docker = "eichlerlab/multisusie:0.1"
 
         ## SplitGenoBySv resources -- runs once over the full geno_tsv, so disk scales
         ## with its actual size (input + external-sort spill + output splits) rather
@@ -104,10 +104,13 @@ workflow multisusie_finemap {
     }
 
     ## ── Step 2: per-(SV, phecode) scatter ────────────────────────────────────
-    scatter (pair in sv_phecode_pairs) {
-        String shard_sv_id     = pair[0]
-        String shard_phenotype = pair[1]
-        File   shard_geno_tsv  = SplitGenoBySv.geno_by_sv[shard_sv_id]
+    ## Indexed rather than a Map[String, File] lookup: SplitGenoBySv.per_pair_geno_tsv
+    ## is already aligned 1:1 with sv_phecode_pairs by position (same order, one entry
+    ## per input row, duplicates preserved), so no runtime lookup is needed.
+    scatter (i in range(length(sv_phecode_pairs))) {
+        String shard_sv_id     = sv_phecode_pairs[i][0]
+        String shard_phenotype = sv_phecode_pairs[i][1]
+        File   shard_geno_tsv  = SplitGenoBySv.per_pair_geno_tsv[i]
 
         call RunMultiSuSiE {
             input:
@@ -288,25 +291,27 @@ task SplitGenoBySv {
                 }
             '
 
-        ## Manifest mapping each original (unsanitized) sv_id -> its split file, for
-        ## read_map() at the WDL level. SVs with no rows in geno_tsv are logged and
-        ## left out of the manifest -- the (sv, phecode) pair using it will fail the
-        ## Map lookup with a clear "key not found" error rather than silently skipping.
-        : > manifest.tsv
+        missing=""
         while IFS= read -r sv; do
             [ -z "$sv" ] && continue
             safe=$(printf '%s' "$sv" | sed 's/[^A-Za-z0-9_.-]/_/g')
-            f="sv_geno/${safe}.tsv"
-            if [[ -s "$f" ]]; then
-                printf '%s\t%s\n' "$sv" "$PWD/$f" >> manifest.tsv
-            else
-                echo "[warn] SV '$sv' not found in geno_tsv -- any (sv, phenotype) pair using it will fail" >&2
-            fi
+            [[ -s "sv_geno/${safe}.tsv" ]] || missing="${missing}${sv}\n"
         done < unique_sv_ids.txt
+        if [[ -n "$missing" ]]; then
+            echo "ERROR: the following sv_id(s) from sv_phecode_tsv have no rows in geno_tsv:" >&2
+            printf "%b" "$missing" >&2
+            exit 1
+        fi
+
+        : > ordered_paths.txt
+        while IFS=$'\t' read -r sv _rest; do
+            safe=$(printf '%s' "$sv" | sed 's/[^A-Za-z0-9_.-]/_/g')
+            printf '%s\n' "$PWD/sv_geno/${safe}.tsv" >> ordered_paths.txt
+        done < "~{sv_phecode_tsv}"
     >>>
 
     output {
-        Map[String, File] geno_by_sv = read_map("manifest.tsv")
+        Array[File] per_pair_geno_tsv = read_lines("ordered_paths.txt")
     }
 
     runtime {
