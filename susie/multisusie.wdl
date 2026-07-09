@@ -2,13 +2,11 @@ version 1.0
 
 ## Multi-population fine-mapping with MultiSuSiE, scattered over (SV, phecode) pairs.
 ##
-## Workflow:
-##   1. SplitGenoBySv — single task; pre-splits geno_tsv into one small per-SV TSV
-##      (only for SVs actually needed), so the potentially-huge full table is read
-##      and localized ONCE instead of once per (SV, phecode) shard.
-##   2. RunMultiSuSiE — scattered; wraps multisusie_finemap.py (pull SV + flanking-SNP
-##      genotypes, run a per-ancestry logistic-regression scan, feed the summary stats
-##      to multisusie_rss).
+## Workflow (per shard, inside a single scatter over sv_phecode_pairs):
+##   1. SplitGenoBySv — filters geno_tsv down to the one SV this shard needs.
+##   2. RunMultiSuSiE — takes SplitGenoBySv's output directly as its geno_tsv input
+##      and wraps multisusie_finemap.py (pull SV + flanking-SNP genotypes, run a
+##      per-ancestry logistic-regression scan, feed the summary stats to multisusie_rss).
 ## See the script's own docstring for full methodology / caveats.
 ##
 ## Input TSV (no header): sv_id <TAB> phenotype
@@ -66,15 +64,13 @@ workflow multisusie_finemap {
         ## statsmodels/MultiSuSiE, bcftools, and the gcloud CLI (for GCS_OAUTH_TOKEN)
         String docker = "eichlerlab/multisusie:0.1"
 
-        ## SplitGenoBySv resources -- runs once over the full geno_tsv, so disk scales
-        ## with its actual size (input + external-sort spill + output splits) rather
-        ## than a fixed guess. awk/sort are single-pass/streaming, so this stays cheap
-        ## even for a very large geno_tsv.
-        Int    prep_cpu          = 2
-        Int    prep_memory_gb    = 4
-        Int    prep_disk_gb      = ceil(size(geno_tsv, "GB")) * 3 + 20
-        Int    prep_preemptible  = 2
-        Int    prep_sort_memory_mb = 3072
+        ## SplitGenoBySv resources -- one call per (SV, phecode) pair, each localizing
+        ## and linear-scanning the full geno_tsv, so disk scales with its actual size.
+        ## and SVs are tested against many phecodes each.
+        Int    prep_cpu         = 2
+        Int    prep_memory_gb   = 4
+        Int    prep_disk_gb     = ceil(size(geno_tsv, "GB")) + 20
+        Int    prep_preemptible = 2
 
         ## RunMultiSuSiE resources -- one shard per (SV, phecode) pair, each now only
         ## handling one SV's already-filtered genotypes plus the covariate/phenotype
@@ -90,34 +86,24 @@ workflow multisusie_finemap {
 
     Array[Array[String]] sv_phecode_pairs = read_tsv(sv_phecode_tsv)
 
-    ## ── Step 1: split geno_tsv into one small per-SV TSV (once, not per shard) ──
-    call SplitGenoBySv {
-        input:
-            geno_tsv        = geno_tsv,
-            sv_phecode_tsv  = sv_phecode_tsv,
-            sort_memory_mb  = prep_sort_memory_mb,
-            cpu             = prep_cpu,
-            memory_gb       = prep_memory_gb,
-            docker          = docker,
-            disk_gb         = prep_disk_gb,
-            preemptible     = prep_preemptible
-    }
-
-    ## ── Step 2: per-(SV, phecode) scatter ────────────────────────────────────
-    ## Indexed rather than a Map[String, File] lookup: SplitGenoBySv.per_pair_geno_tsv
-    ## is already aligned 1:1 with sv_phecode_pairs by position (same order, one entry
-    ## per input row, duplicates preserved), so no runtime lookup is needed.
-    scatter (i in range(length(sv_phecode_pairs))) {
-        String shard_sv_id     = sv_phecode_pairs[i][0]
-        String shard_phenotype = sv_phecode_pairs[i][1]
-        File   shard_geno_tsv  = SplitGenoBySv.per_pair_geno_tsv[i]
+    scatter (pair in sv_phecode_pairs) {
+        call SplitGenoBySv {
+            input:
+                geno_tsv    = geno_tsv,
+                sv_id       = pair[0],
+                cpu         = prep_cpu,
+                memory_gb   = prep_memory_gb,
+                docker      = docker,
+                disk_gb     = prep_disk_gb,
+                preemptible = prep_preemptible
+        }
 
         call RunMultiSuSiE {
             input:
-                sv_id                        = shard_sv_id,
-                phenotype                    = shard_phenotype,
+                sv_id                        = pair[0],
+                phenotype                    = pair[1],
                 script                       = multisusie_finemap_script,
-                geno_tsv                     = shard_geno_tsv,
+                geno_tsv                     = SplitGenoBySv.sv_geno_tsv,
                 covariate_file               = covariate_file,
                 pheno_tsv                    = pheno_tsv,
                 vcf_pattern                  = vcf_pattern,
@@ -152,6 +138,43 @@ workflow multisusie_finemap {
     output {
         Array[File] variant_results  = RunMultiSuSiE.variant_results_tsv
         Array[File] multisusie_pkl   = RunMultiSuSiE.multisusie_pkl
+    }
+}
+
+# ---------------------------------------------------------------------------
+task SplitGenoBySv {
+    input {
+        File   geno_tsv
+        String sv_id
+        Int    cpu
+        Int    memory_gb
+        String docker
+        Int    disk_gb
+        Int    preemptible
+    }
+
+    command <<<
+        set -euo pipefail
+
+        head -n1 "~{geno_tsv}" > sv_geno.tsv
+        awk -F'\t' -v sv="~{sv_id}" '$1 == sv' "~{geno_tsv}" >> sv_geno.tsv
+
+        if [[ $(wc -l < sv_geno.tsv) -le 1 ]]; then
+            echo "ERROR: sv_id '~{sv_id}' has no rows in geno_tsv" >&2
+            exit 1
+        fi
+    >>>
+
+    output {
+        File sv_geno_tsv = "sv_geno.tsv"
+    }
+
+    runtime {
+        docker:      docker
+        cpu:         cpu
+        memory:      "~{memory_gb} GB"
+        disks:       "local-disk ~{disk_gb} HDD"
+        preemptible: preemptible
     }
 }
 
@@ -246,79 +269,3 @@ task RunMultiSuSiE {
     }
 }
 
-# ---------------------------------------------------------------------------
-task SplitGenoBySv {
-    input {
-        File geno_tsv
-        File sv_phecode_tsv
-        Int  sort_memory_mb
-        Int    cpu
-        Int    memory_gb
-        String docker
-        Int    disk_gb
-        Int    preemptible
-    }
-
-    command <<<
-        set -euo pipefail
-        mkdir -p sv_geno
-
-        header=$(head -n1 "~{geno_tsv}")
-
-        ## Unique SV ids actually needed (col 1 of sv_phecode_tsv, deduplicated) --
-        ## SVs tested against multiple phecodes are only extracted once.
-        cut -f1 "~{sv_phecode_tsv}" | sort -u > unique_sv_ids.txt
-
-        ## Single streaming pass: filter geno_tsv to wanted SVs, sort by SVID (external
-        ## sort spills to disk so this scales to arbitrarily large geno_tsv without
-        ## loading it into memory), then write one row-group per file, never holding
-        ## more than one output file handle open at a time.
-        awk -F'\t' 'NR==FNR { want[$1]=1; next } ($1 in want)' \
-                unique_sv_ids.txt <(tail -n +2 "~{geno_tsv}") \
-            | sort -t $'\t' -k1,1 -S "~{sort_memory_mb}M" \
-            | awk -F'\t' -v header="$header" '
-                BEGIN { cur = "" }
-                {
-                    if ($1 != cur) {
-                        if (cur != "") close(outfile)
-                        cur = $1
-                        safe = cur
-                        gsub(/[^A-Za-z0-9_.-]/, "_", safe)
-                        outfile = "sv_geno/" safe ".tsv"
-                        print header > outfile
-                    }
-                    print $0 > outfile
-                }
-            '
-
-        missing=""
-        while IFS= read -r sv; do
-            [ -z "$sv" ] && continue
-            safe=$(printf '%s' "$sv" | sed 's/[^A-Za-z0-9_.-]/_/g')
-            [[ -s "sv_geno/${safe}.tsv" ]] || missing="${missing}${sv}\n"
-        done < unique_sv_ids.txt
-        if [[ -n "$missing" ]]; then
-            echo "ERROR: the following sv_id(s) from sv_phecode_tsv have no rows in geno_tsv:" >&2
-            printf "%b" "$missing" >&2
-            exit 1
-        fi
-
-        : > ordered_paths.txt
-        while IFS=$'\t' read -r sv _rest; do
-            safe=$(printf '%s' "$sv" | sed 's/[^A-Za-z0-9_.-]/_/g')
-            printf '%s\n' "$PWD/sv_geno/${safe}.tsv" >> ordered_paths.txt
-        done < "~{sv_phecode_tsv}"
-    >>>
-
-    output {
-        Array[File] per_pair_geno_tsv = read_lines("ordered_paths.txt")
-    }
-
-    runtime {
-        docker:      docker
-        cpu:         cpu
-        memory:      "~{memory_gb} GB"
-        disks:       "local-disk ~{disk_gb} HDD"
-        preemptible: preemptible
-    }
-}
