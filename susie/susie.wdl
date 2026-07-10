@@ -4,9 +4,10 @@ version 1.0
 ##
 ## Input TSV (no header): sv_id <TAB> phenotype
 ## Workflow:
-##   1. PrepVcfs        — single task; splits geno TSV into one VCF per SV
-##   2. PrepMergedPgen  — scattered; fetches flanking SNPs, merges with SV GT, builds pgen
-##   3. RunSusie        — scattered; susie(X, y) → PIPs + credible sets
+##   1. PrepVcfs          — single task; splits geno TSV into one VCF per SV
+##   2. PrepMergedPgen    — scattered; fetches flanking SNPs, merges with SV GT, builds pgen
+##   3. RunSusie          — scattered; susie(X, y) → PIPs + credible sets
+##   4. MergeSusieResults — single task; gathers all per-SV susie outputs into one directory
 
 workflow susieR_finemap_prep {
     input {
@@ -126,9 +127,17 @@ workflow susieR_finemap_prep {
         }
     }
 
+    ## ── Step 5: gather every per-SV susie result into one output directory ────
+    call MergeSusieResults {
+        input:
+            susie_files = RunSusie.susie_out,
+            docker      = docker
+    }
+
     output {
-        Array[File] snp_tsv   = PrepMergedPgen.snp_tsv
-        Array[File] susie_out = RunSusie.susie_out
+        Array[File] snp_tsv          = PrepMergedPgen.snp_tsv
+        Array[File] susie_out        = RunSusie.susie_out
+        File        susie_merged_dir = MergeSusieResults.merged_dir
     }
 }
 
@@ -469,3 +478,40 @@ task RunSusie {
     }
 }
 
+# ---------------------------------------------------------------------------
+task MergeSusieResults {
+    input {
+        Array[File] susie_files
+        String      docker
+        Int         cpu         = 1
+        Int         memory_gb   = 4
+        Int         disk_gb     = 20
+        Int         preemptible = 1
+    }
+
+    command <<<
+        set -euo pipefail
+
+        ## Gather every per-SV susie TSV into one directory, then package it
+        ## as a tarball — WDL/Cromwell task outputs must be files, not raw
+        ## directories.
+        mkdir -p susie_results
+        while read -r f; do
+            cp "$f" susie_results/
+        done < "~{write_lines(susie_files)}"
+
+        tar -czf susie_results.tar.gz susie_results
+    >>>
+
+    output {
+        File merged_dir = "susie_results.tar.gz"
+    }
+
+    runtime {
+        docker:      docker
+        cpu:         cpu
+        memory:      "~{memory_gb} GB"
+        disks:       "local-disk ~{disk_gb} SSD"
+        preemptible: preemptible
+    }
+}
