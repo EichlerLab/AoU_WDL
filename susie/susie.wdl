@@ -222,7 +222,6 @@ task PrepMergedPgen {
 
         sv="~{sv_id}"
 
-        export GCS_OAUTH_TOKEN=$(gcloud auth print-access-token)
         export GCS_REQUESTER_PAYS_PROJECT="~{google_project}"
 
         ## Extract sample list from VCF header for bcftools -S
@@ -245,12 +244,30 @@ task PrepMergedPgen {
         ## 1. Fetch + filter flanking SNPs from GCS phased VCF
         snp_vcf_path="gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/phasing/${chrom}_AOU_v8.2_allsamples_phased.vcf.gz"
 
-        bcftools view --threads ~{cpu} -r "$region" -S "${sv}_samples.txt" "$snp_vcf_path" \
-            | bcftools norm --threads ~{cpu} -m - \
-            | bcftools view --threads ~{cpu} -m2 -M2 -v snps \
-            | bcftools annotate --set-id +'%CHROM\_%POS\_%REF\_%FIRST_ALT' \
-            | bcftools filter -i "AC > ~{min_ac}" \
-            -Oz -o "${sv}_SNP.vcf.gz"
+        ## bcftools' GCS reads occasionally fail mid-stream with a libcurl
+        ## HTTP/2 framing error (curl error 92). Retry with new token
+        fetch_snps() {
+            export GCS_OAUTH_TOKEN=$(gcloud auth print-access-token)
+            bcftools view --threads ~{cpu} -r "$region" -S "${sv}_samples.txt" "$snp_vcf_path" \
+                | bcftools norm --threads ~{cpu} -m - \
+                | bcftools view --threads ~{cpu} -m2 -M2 -v snps \
+                | bcftools annotate --set-id +'%CHROM\_%POS\_%REF\_%FIRST_ALT' \
+                | bcftools filter -i "AC > ~{min_ac}" \
+                -Oz -o "${sv}_SNP.vcf.gz"
+        }
+
+        max_attempts=5
+        for attempt in $(seq 1 "$max_attempts"); do
+            if fetch_snps; then
+                break
+            fi
+            if [[ "$attempt" -eq "$max_attempts" ]]; then
+                echo "GCS fetch failed after ${max_attempts} attempts" >&2
+                exit 1
+            fi
+            echo "GCS fetch attempt ${attempt} failed, retrying in 10s..." >&2
+            sleep 10
+        done
         bcftools index --threads ~{cpu} -t "${sv}_SNP.vcf.gz"
 
         ## 2. SNP summary table (MAF / AC)
@@ -451,3 +468,4 @@ task RunSusie {
         preemptible: preemptible
     }
 }
+
