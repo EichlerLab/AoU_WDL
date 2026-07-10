@@ -2,18 +2,25 @@ version 1.0
 
 ## Fine-mapping pipeline: per-SV scatter for susieR.
 ##
-## Input TSV (no header): sv_id <TAB> phenotype
+## Input TSV (no header): sv_id <TAB> phenotype. An SV may appear on more than
+## one row (multiple phenotypes) — PrepVcfs expands these into one
+## (sv, phenotype) pair per row, and the scatter below runs once per pair.
 ## Workflow:
-##   1. PrepVcfs          — single task; splits geno TSV into one VCF per SV
-##   2. PrepMergedPgen    — scattered; fetches flanking SNPs, merges with SV GT, builds pgen
-##   3. RunSusie          — scattered; susie(X, y) → PIPs + credible sets
-##   4. MergeSusieResults — single task; gathers all per-SV susie outputs into one directory
+##   1. PrepVcfs          — single task; splits geno TSV into one VCF per SV,
+##                          expanded to one row per (sv, phenotype) pair
+##   2. PrepMergedPgen    — scattered per (sv, phenotype) pair; fetches flanking SNPs,
+##                          merges with SV GT, builds pgen (recomputed per phenotype
+##                          when an SV has more than one — see PrepMergedPgen note)
+##   3. RunSusie          — scattered per (sv, phenotype) pair; susie(X, y) → PIPs + credible sets
+##   4. MergeSusieResults — single task; gathers all per-(sv, phenotype) susie outputs
+##                          into one directory
 
 workflow susieR_finemap_prep {
     input {
         ## Pre-computed per-SV VCFs — if provided, PrepVcfs is skipped entirely.
         ## precomputed_vcf_files must be parallel to and match the line order of
-        ## precomputed_phenotypes_file (one phenotype per line, no header).
+        ## precomputed_phenotypes_file (one phenotype per line, no header). If an SV
+        ## has multiple phenotypes, repeat its VCF file path once per phenotype.
         Array[File]? precomputed_vcf_files
         File?        precomputed_phenotypes_file
 
@@ -173,32 +180,35 @@ task PrepVcfs {
             --output-dir                  . \
             --sv-list-out                 sv_list.txt
 
-        ## Write sv_ids and phenotypes in alphabetical order (matching glob("*_GT.vcf"))
+        ## Expand bonferroni_hits_tsv into one row per (sv_id, phenotype) pair for every
+        ## successfully-generated SV.
         python3 - <<'PYEOF'
 bonferroni_hits = "~{bonferroni_hits_tsv}"
 
 with open("sv_list.txt") as f:
     successful = set(line.strip().replace("_GT.vcf", "") for line in f if line.strip())
 
-sv_to_pheno = {}
+pairs = []
 with open(bonferroni_hits) as f:
     for line in f:
         parts = line.strip().split("\t")
         if len(parts) >= 2 and parts[0] in successful:
-            sv_to_pheno[parts[0]] = parts[1]
+            pairs.append((parts[0], parts[1]))
 
-ordered = sorted(sv_to_pheno)
-with open("sv_ids_ordered.txt", "w") as f:
-    f.write("\n".join(ordered) + "\n")
+## Sort by (sv_id, phenotype) for determinism.
+pairs.sort()
+
 with open("phenotypes_ordered.txt", "w") as f:
-    f.write("\n".join(sv_to_pheno[sv] for sv in ordered) + "\n")
+    f.write("\n".join(p[1] for p in pairs) + "\n")
+with open("vcf_paths_ordered.txt", "w") as f:
+    f.write("\n".join(f"{p[0]}_GT.vcf" for p in pairs) + "\n")
 PYEOF
     >>>
 
     output {
-        ## glob returns files in alphabetical order; phenotypes are written
-        ## in the same alphabetical order so the two arrays are aligned.
-        Array[File]   vcf_files  = glob("*_GT.vcf")
+        ## vcf_files repeats the same underlying VCF once per phenotype, staying
+        ## parallel to phenotypes.
+        Array[File]   vcf_files  = read_lines("vcf_paths_ordered.txt")
         Array[String] phenotypes = read_lines("phenotypes_ordered.txt")
     }
 
@@ -212,10 +222,13 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
+## Note: does not depend on phenotype, but the workflow scatters over
+## (sv, phenotype) pairs — an SV with N phenotypes runs this task N times,
+## recomputing the same merged pgen each time.
 task PrepMergedPgen {
     input {
         String sv_id
-        File   sv_gt_vcf   # per-SV VCF from PrepVcfs
+        File   sv_gt_vcf   # per-SV VCF from PrepVcfs; same file reused across phenotype shards
         String google_project
         Int    flank_bp
         Int    min_ac
@@ -460,13 +473,16 @@ task RunSusie {
         )
         final_df <- final_df[order(-final_df$PIP), ]
 
-        write.table(final_df, paste0(sv, "_susie.tsv"),
+        ## Phenotype suffix keeps output filenames unique when an SV has more than
+        ## one phenotype — otherwise MergeSusieResults would silently overwrite one
+        ## shard's result with another's when collecting them into one directory.
+        write.table(final_df, paste0(sv, "_", phecode, "_susie.tsv"),
                     sep = "\t", quote = FALSE, row.names = FALSE)
         REOF
     >>>
 
     output {
-        File susie_out = "~{sv_id}_susie.tsv"
+        File susie_out = "~{sv_id}_~{phenotype}_susie.tsv"
     }
 
     runtime {
@@ -492,9 +508,10 @@ task MergeSusieResults {
     command <<<
         set -euo pipefail
 
-        ## Gather every per-SV susie TSV into one directory, then package it
-        ## as a tarball — WDL/Cromwell task outputs must be files, not raw
-        ## directories.
+        ## Gather every per-(sv, phenotype) susie TSV into one directory, then
+        ## package it as a tarball — WDL/Cromwell task outputs must be files, not
+        ## raw directories. Filenames embed both sv_id and phenotype (see
+        ## RunSusie), so SVs with multiple phenotypes don't collide here.
         mkdir -p susie_results
         while read -r f; do
             cp "$f" susie_results/
