@@ -100,7 +100,8 @@ workflow susieR_finemap_prep {
 
     ## ── Step 2–4: per-SV scatter ─────────────────────────────────────────────
     scatter (i in range(length(phenotypes))) {
-        File   sv_gt_vcf = vcf_files[vcf_indices[i]]
+        Int    vcf_idx   = vcf_indices[i]
+        File   sv_gt_vcf = vcf_files[vcf_idx]
         String sv_id     = basename(sv_gt_vcf, "_GT.vcf")
         String phenotype = sub(phenotypes[i], "^\\s+|\\s+$", "")
 
