@@ -185,14 +185,18 @@ task PrepVcfs {
         python3 - <<'PYEOF'
 bonferroni_hits = "~{bonferroni_hits_tsv}"
 
+sv_to_filename = {}
 with open("sv_list.txt") as f:
-    successful = set(line.strip().replace("_GT.vcf", "") for line in f if line.strip())
+    for line in f:
+        filename = line.strip()
+        if filename:
+            sv_to_filename[filename.replace("_GT.vcf", "")] = filename
 
 pairs = []
 with open(bonferroni_hits) as f:
     for line in f:
         parts = line.strip().split("\t")
-        if len(parts) >= 2 and parts[0] in successful:
+        if len(parts) >= 2 and parts[0] in sv_to_filename:
             pairs.append((parts[0], parts[1]))
 
 ## Sort by (sv_id, phenotype) for determinism.
@@ -201,7 +205,7 @@ pairs.sort()
 with open("phenotypes_ordered.txt", "w") as f:
     f.write("\n".join(p[1] for p in pairs) + "\n")
 with open("vcf_paths_ordered.txt", "w") as f:
-    f.write("\n".join(f"{p[0]}_GT.vcf" for p in pairs) + "\n")
+    f.write("\n".join(sv_to_filename[p[0]] for p in pairs) + "\n")
 PYEOF
     >>>
 
