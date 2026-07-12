@@ -90,12 +90,17 @@ workflow susieR_finemap_prep {
         Array[String] precomputed_phenotypes = read_lines(select_first([precomputed_phenotypes_file]))
     }
 
-    Array[File]   vcf_files  = select_first([precomputed_vcf_files,  PrepVcfs.vcf_files])
-    Array[String] phenotypes = select_first([precomputed_phenotypes, PrepVcfs.phenotypes])
+    if (defined(precomputed_vcf_files)) {
+        Array[Int] precomputed_vcf_indices = range(length(select_first([precomputed_vcf_files])))
+    }
+
+    Array[File]   vcf_files   = select_first([precomputed_vcf_files,   PrepVcfs.vcf_files])
+    Array[String] phenotypes  = select_first([precomputed_phenotypes,  PrepVcfs.phenotypes])
+    Array[Int]    vcf_indices = select_first([precomputed_vcf_indices, PrepVcfs.vcf_indices])
 
     ## ── Step 2–4: per-SV scatter ─────────────────────────────────────────────
-    scatter (i in range(length(vcf_files))) {
-        File   sv_gt_vcf = vcf_files[i]
+    scatter (i in range(length(phenotypes))) {
+        File   sv_gt_vcf = vcf_files[vcf_indices[i]]
         String sv_id     = basename(sv_gt_vcf, "_GT.vcf")
         String phenotype = sub(phenotypes[i], "^\\s+|\\s+$", "")
 
@@ -185,18 +190,19 @@ task PrepVcfs {
         python3 - <<'PYEOF'
 bonferroni_hits = "~{bonferroni_hits_tsv}"
 
-sv_to_filename = {}
 with open("sv_list.txt") as f:
-    for line in f:
-        filename = line.strip()
-        if filename:
-            sv_to_filename[filename.replace("_GT.vcf", "")] = filename
+    successful = set(line.strip().replace("_GT.vcf", "") for line in f if line.strip())
+
+## Index into the alphabetical order glob("*_GT.vcf") will return, so vcf_indices
+## can point at the right file without ever reconstructing a filename.
+unique_svs = sorted(successful)
+sv_index   = {sv: i for i, sv in enumerate(unique_svs)}
 
 pairs = []
 with open(bonferroni_hits) as f:
     for line in f:
         parts = line.strip().split("\t")
-        if len(parts) >= 2 and parts[0] in sv_to_filename:
+        if len(parts) >= 2 and parts[0] in sv_index:
             pairs.append((parts[0], parts[1]))
 
 ## Sort by (sv_id, phenotype) for determinism.
@@ -204,16 +210,15 @@ pairs.sort()
 
 with open("phenotypes_ordered.txt", "w") as f:
     f.write("\n".join(p[1] for p in pairs) + "\n")
-with open("vcf_paths_ordered.txt", "w") as f:
-    f.write("\n".join(sv_to_filename[p[0]] for p in pairs) + "\n")
+with open("vcf_indices_ordered.txt", "w") as f:
+    f.write("\n".join(str(sv_index[p[0]]) for p in pairs) + "\n")
 PYEOF
     >>>
 
     output {
-        ## vcf_files repeats the same underlying VCF once per phenotype, staying
-        ## parallel to phenotypes.
-        Array[File]   vcf_files  = read_lines("vcf_paths_ordered.txt")
-        Array[String] phenotypes = read_lines("phenotypes_ordered.txt")
+        Array[File]   vcf_files   = glob("*_GT.vcf")
+        Array[String] phenotypes  = read_lines("phenotypes_ordered.txt")
+        Array[Int]    vcf_indices = read_lines("vcf_indices_ordered.txt")
     }
 
     runtime {
