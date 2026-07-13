@@ -2,27 +2,25 @@ version 1.0
 
 ## Fine-mapping pipeline: per-SV scatter for susieR.
 ##
-## Input TSV (no header): sv_id <TAB> phenotype. An SV may appear on more than
-## one row (multiple phenotypes) — PrepVcfs expands these into one
-## (sv, phenotype) pair per row, and the scatter below runs once per pair.
+## Input TSV (no header): sv_id <TAB> phecode_1 phecode_2 ... (space-separated phecodes).
 ## Workflow:
-##   1. PrepVcfs          — single task; splits geno TSV into one VCF per SV,
-##                          expanded to one row per (sv, phenotype) pair
-##   2. PrepMergedPgen    — scattered per (sv, phenotype) pair; fetches flanking SNPs,
-##                          merges with SV GT, builds pgen (recomputed per phenotype
-##                          when an SV has more than one — see PrepMergedPgen note)
-##   3. RunSusie          — scattered per (sv, phenotype) pair; susie(X, y) → PIPs + credible sets
-##   4. MergeSusieResults — single task; gathers all per-(sv, phenotype) susie outputs
+##   1. PrepVcfs          — single task; splits geno TSV into one VCF per unique SV
+##   2. PrepMergedPgen    — scattered per unique SV (outer scatter); fetches flanking SNPs,
+##                          merges with SV GT, builds pgen — runs once per SV regardless of
+##                          how many phecodes it has
+##   3. RunSusie          — scattered per phecode within each SV (inner scatter), reusing
+##                          that SV's pgen; susie(X, y) → PIPs + credible sets
+##   4. MergeSusieResults — single task; gathers all per-(sv, phecode) susie outputs
 ##                          into one directory
 
 workflow susieR_finemap_prep {
     input {
         ## Pre-computed per-SV VCFs — if provided, PrepVcfs is skipped entirely.
-        ## precomputed_vcf_files must be parallel to and match the line order of
-        ## precomputed_phenotypes_file (one phenotype per line, no header). If an SV
-        ## has multiple phenotypes, repeat its VCF file path once per phenotype.
+        ## precomputed_vcf_files must be parallel to precomputed_phenotypes_grouped_file,
+        ## a JSON array of arrays (one inner array of phecodes per VCF), e.g.
+        ## [["T2D","Obesity"],["Asthma"]].
         Array[File]? precomputed_vcf_files
-        File?        precomputed_phenotypes_file
+        File?        precomputed_phenotypes_grouped_file
 
         ## PrepVcfs inputs — bonferroni_hits_tsv always required; others only needed
         ## when precomputed VCFs are not supplied
@@ -86,24 +84,17 @@ workflow susieR_finemap_prep {
         }
     }
 
-    if (defined(precomputed_phenotypes_file)) {
-        Array[String] precomputed_phenotypes = read_lines(select_first([precomputed_phenotypes_file]))
+    if (defined(precomputed_phenotypes_grouped_file)) {
+        Array[Array[String]] precomputed_phenotypes_grouped = read_json(select_first([precomputed_phenotypes_grouped_file]))
     }
 
-    if (defined(precomputed_vcf_files)) {
-        Array[Int] precomputed_vcf_indices = range(length(select_first([precomputed_vcf_files])))
-    }
+    Array[File]           vcf_files          = select_first([precomputed_vcf_files,          PrepVcfs.vcf_files])
+    Array[Array[String]]  phenotypes_grouped = select_first([precomputed_phenotypes_grouped, PrepVcfs.phenotypes_grouped])
 
-    Array[File]   vcf_files   = select_first([precomputed_vcf_files,   PrepVcfs.vcf_files])
-    Array[String] phenotypes  = select_first([precomputed_phenotypes,  PrepVcfs.phenotypes])
-    Array[Int]    vcf_indices = select_first([precomputed_vcf_indices, PrepVcfs.vcf_indices])
-
-    ## ── Step 2–4: per-SV scatter ─────────────────────────────────────────────
-    scatter (i in range(length(phenotypes))) {
-        Int    vcf_idx   = vcf_indices[i]
-        File   sv_gt_vcf = vcf_files[vcf_idx]
+    ## ── Step 2–4: outer scatter per unique SV, inner scatter per phecode ──────
+    scatter (i in range(length(vcf_files))) {
+        File   sv_gt_vcf = vcf_files[i]
         String sv_id     = basename(sv_gt_vcf, "_GT.vcf")
-        String phenotype = sub(phenotypes[i], "^\\s+|\\s+$", "")
 
         call PrepMergedPgen {
             input:
@@ -119,37 +110,41 @@ workflow susieR_finemap_prep {
                 preemptible    = preemptible
         }
 
-        call RunSusie {
-            input:
-                sv_id          = sv_id,
-                phenotype      = phenotype,
-                merged_pgen    = PrepMergedPgen.merged_pgen,
-                merged_pvar    = PrepMergedPgen.merged_pvar,
-                merged_psam    = PrepMergedPgen.merged_psam,
-                phenotype_file = phenotype_file,
-                covariate_file = covariate_file,
-                covar_names        = covar_names,
-                min_case_carriers  = min_case_carriers,
-                susie_L            = susie_L,
-                susie_coverage     = susie_coverage,
-                cpu                = cpu,
-                memory_gb          = memory_gb,
-                docker             = docker,
-                disk_gb            = disk_gb,
-                preemptible       = preemptible
+        scatter (phenotype in phenotypes_grouped[i]) {
+            call RunSusie {
+                input:
+                    sv_id          = sv_id,
+                    phenotype      = phenotype,
+                    merged_pgen    = PrepMergedPgen.merged_pgen,
+                    merged_pvar    = PrepMergedPgen.merged_pvar,
+                    merged_psam    = PrepMergedPgen.merged_psam,
+                    phenotype_file = phenotype_file,
+                    covariate_file = covariate_file,
+                    covar_names        = covar_names,
+                    min_case_carriers  = min_case_carriers,
+                    susie_L            = susie_L,
+                    susie_coverage     = susie_coverage,
+                    cpu                = cpu,
+                    memory_gb          = memory_gb,
+                    docker             = docker,
+                    disk_gb            = disk_gb,
+                    preemptible       = preemptible
+            }
         }
     }
 
-    ## ── Step 5: gather every per-SV susie result into one output directory ────
+    Array[File] susie_out_flat = flatten(RunSusie.susie_out)
+
+    ## ── Step 5: gather every susie result into one output directory ──────────
     call MergeSusieResults {
         input:
-            susie_files = RunSusie.susie_out,
+            susie_files = susie_out_flat,
             docker      = docker
     }
 
     output {
         Array[File] snp_tsv          = PrepMergedPgen.snp_tsv
-        Array[File] susie_out        = RunSusie.susie_out
+        Array[File] susie_out        = susie_out_flat
         File        susie_merged_dir = MergeSusieResults.merged_dir
     }
 }
@@ -186,40 +181,32 @@ task PrepVcfs {
             --output-dir                  . \
             --sv-list-out                 sv_list.txt
 
-        ## Expand bonferroni_hits_tsv into one row per (sv_id, phenotype) pair for every
-        ## successfully-generated SV.
+        ## Group each successfully-generated SV's phecodes (col 2, space-separated) into
+        ## a JSON array of arrays, in the same alphabetical order glob("*_GT.vcf") returns.
         python3 - <<'PYEOF'
+import json
+
 bonferroni_hits = "~{bonferroni_hits_tsv}"
 
 with open("sv_list.txt") as f:
     successful = set(line.strip().replace("_GT.vcf", "") for line in f if line.strip())
 
-## Index into the alphabetical order glob("*_GT.vcf") will return, so vcf_indices
-## can point at the right file without ever reconstructing a filename.
-unique_svs = sorted(successful)
-sv_index   = {sv: i for i, sv in enumerate(unique_svs)}
-
-pairs = []
+sv_to_phenos = {}
 with open(bonferroni_hits) as f:
     for line in f:
-        parts = line.strip().split("\t")
-        if len(parts) >= 2 and parts[0] in sv_index:
-            pairs.append((parts[0], parts[1]))
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) >= 2 and parts[0] in successful:
+            sv_to_phenos[parts[0]] = parts[1].split()
 
-## Sort by (sv_id, phenotype) for determinism.
-pairs.sort()
-
-with open("phenotypes_ordered.txt", "w") as f:
-    f.write("\n".join(p[1] for p in pairs) + "\n")
-with open("vcf_indices_ordered.txt", "w") as f:
-    f.write("\n".join(str(sv_index[p[0]]) for p in pairs) + "\n")
+unique_svs = sorted(sv_to_phenos)
+with open("phenotypes_grouped.json", "w") as f:
+    json.dump([sv_to_phenos[sv] for sv in unique_svs], f)
 PYEOF
     >>>
 
     output {
-        Array[File]   vcf_files   = glob("*_GT.vcf")
-        Array[String] phenotypes  = read_lines("phenotypes_ordered.txt")
-        Array[Int]    vcf_indices = read_lines("vcf_indices_ordered.txt")
+        Array[File]           vcf_files          = glob("*_GT.vcf")
+        Array[Array[String]]  phenotypes_grouped = read_json("phenotypes_grouped.json")
     }
 
     runtime {
@@ -232,13 +219,10 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
-## Note: does not depend on phenotype, but the workflow scatters over
-## (sv, phenotype) pairs — an SV with N phenotypes runs this task N times,
-## recomputing the same merged pgen each time.
 task PrepMergedPgen {
     input {
         String sv_id
-        File   sv_gt_vcf   # per-SV VCF from PrepVcfs; same file reused across phenotype shards
+        File   sv_gt_vcf   # per-SV VCF from PrepVcfs
         String google_project
         Int    flank_bp
         Int    min_ac
@@ -487,9 +471,7 @@ task RunSusie {
         )
         final_df <- final_df[order(-final_df$PIP), ]
 
-        ## Phenotype suffix keeps output filenames unique when an SV has more than
-        ## one phenotype — otherwise MergeSusieResults would silently overwrite one
-        ## shard's result with another's when collecting them into one directory.
+        ## Phenotype suffix keeps filenames unique when an SV has more than one phenotype.
         write.table(final_df, paste0(sv, "_", phecode, "_susie.tsv"),
                     sep = "\t", quote = FALSE, row.names = FALSE)
         REOF
@@ -522,10 +504,7 @@ task MergeSusieResults {
     command <<<
         set -euo pipefail
 
-        ## Gather every per-(sv, phenotype) susie TSV into one directory, then
-        ## package it as a tarball — WDL/Cromwell task outputs must be files, not
-        ## raw directories. Filenames embed both sv_id and phenotype (see
-        ## RunSusie), so SVs with multiple phenotypes don't collide here.
+        ## Packaged as a tarball since WDL/Cromwell task outputs must be files, not directories.
         mkdir -p susie_results
         while read -r f; do
             cp "$f" susie_results/
