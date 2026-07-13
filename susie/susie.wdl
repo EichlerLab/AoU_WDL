@@ -6,7 +6,8 @@ version 1.0
 ## Workflow:
 ##   1. PrepVcfs          — single task; splits geno TSV into one VCF per unique SV
 ##   2. PrepMergedPgen    — scattered per unique SV (outer scatter); fetches flanking SNPs,
-##                          merges with SV GT, builds pgen — runs once per SV regardless of
+##                          merges with SV GT, builds pgen, and computes pairwise unphased
+##                          LD (r^2) across the merged set — runs once per SV regardless of
 ##                          how many phecodes it has
 ##   3. RunSusie          — scattered per phecode within each SV (inner scatter), reusing
 ##                          that SV's pgen; susie(X, y) → PIPs + credible sets
@@ -144,6 +145,7 @@ workflow susieR_finemap_prep {
 
     output {
         Array[File] snp_tsv          = PrepMergedPgen.snp_tsv
+        Array[File] ld_files         = PrepMergedPgen.merged_ld
         Array[File] susie_out        = susie_out_flat
         File        susie_merged_dir = MergeSusieResults.merged_dir
     }
@@ -301,6 +303,9 @@ task PrepMergedPgen {
         tabix -p vcf "${sv}_merged.vcf.gz"
 
         plink2 --vcf "${sv}_merged.vcf.gz" --make-pgen --out "${sv}_merged"
+
+        ## 5. Unphased pairwise LD (r^2) across the merged SV + flanking-SNP set
+        plink2 --pfile "${sv}_merged" --r2-unphased --ld-window-r2 0 --out "${sv}_ld"
     >>>
 
     output {
@@ -308,6 +313,7 @@ task PrepMergedPgen {
         File merged_pgen = "~{sv_id}_merged.pgen"
         File merged_pvar = "~{sv_id}_merged.pvar"
         File merged_psam = "~{sv_id}_merged.psam"
+        File merged_ld   = "~{sv_id}_ld.vcor"
     }
 
     runtime {
