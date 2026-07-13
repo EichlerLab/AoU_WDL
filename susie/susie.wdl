@@ -421,15 +421,19 @@ task RunSusie {
         row_idx <- match(dat$IID, sample_ids)
         X_raw   <- X_full[row_idx, , drop = FALSE]
 
-        ## ── 3. Drop variants with too few case carriers ───────────────────────
+        ## ── 3. Drop variants with too few case carriers, or with no variance
+        ## in this subset (susie's scale() would turn those into NaN columns).
         case_status      <- dat[[phecode]]
         is_carrier_full  <- round(X_raw) >= 1
-        n_case_with_full <- colSums(is_carrier_full[case_status == 1, , drop = FALSE])
-        keep             <- n_case_with_full >= ~{min_case_carriers}
+        n_case_with_full <- colSums(is_carrier_full[case_status == 1, , drop = FALSE], na.rm = TRUE)
+        has_variance     <- apply(X_raw, 2, function(col) length(unique(col[!is.na(col)])) > 1)
+        keep             <- (n_case_with_full >= ~{min_case_carriers}) & has_variance
 
         message(sprintf(
-            "dropping %d/%d variant(s) with fewer than %d case carrier(s)",
-            sum(!keep), length(keep), ~{min_case_carriers}
+            "dropping %d/%d variant(s): %d with fewer than %d case carrier(s), %d monomorphic in this subset: %s",
+            sum(!keep), length(keep),
+            sum(n_case_with_full < ~{min_case_carriers}), ~{min_case_carriers},
+            sum(!has_variance), paste(variant_ids[!has_variance], collapse = ", ")
         ))
 
         variant_ids <- variant_ids[keep]
