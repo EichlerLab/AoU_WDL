@@ -5,13 +5,20 @@ version 1.0
 ## Input TSV (no header): sv_id <TAB> phecode_1 phecode_2 ... (space-separated phecodes).
 ## Workflow:
 ##   1. PrepVcfs          — single task; splits geno TSV into one VCF per unique SV
-##   2. PrepMergedPgen    — scattered per unique SV (outer scatter); fetches flanking SNPs,
-##                          merges with SV GT, builds pgen, and computes pairwise unphased
-##                          LD (r^2) across the merged set — runs once per SV regardless of
-##                          how many phecodes it has
-##   3. RunSusie          — scattered per phecode within each SV (inner scatter), reusing
-##                          that SV's pgen; susie(X, y) → PIPs + credible sets
-##   4. MergeSusieResults — single task; gathers all per-(sv, phecode) susie outputs
+##   2. FlattenPhenotypes — single task; turns the jagged phenotypes_grouped
+##                          (Array[Array[String]], one inner array per SV) into flat,
+##                          parallel (sv_index, phenotype) arrays — one entry per
+##                          (sv, phecode) pair. Lets RunSusie scatter over a single flat
+##                          list instead of nesting a scatter inside the per-SV scatter
+##                          (nested scatters weren't executing reliably on this backend).
+##   3. PrepMergedPgen    — scattered per unique SV; fetches flanking SNPs, merges with
+##                          SV GT, builds pgen, and computes pairwise unphased LD (r^2)
+##                          across the merged set — runs once per SV regardless of how
+##                          many phecodes it has
+##   4. RunSusie          — scattered per (sv, phecode) pair from FlattenPhenotypes,
+##                          reusing that SV's pgen via flat_sv_index; susie(X, y) →
+##                          PIPs + credible sets
+##   5. MergeSusieResults — single task; gathers all per-(sv, phecode) susie outputs
 ##                          into one directory
 
 workflow susieR_finemap_prep {
@@ -109,6 +116,14 @@ workflow susieR_finemap_prep {
     Array[File]           vcf_files          = select_first([precomputed_vcf_files,          PrepVcfs.vcf_files])
     Array[Array[String]]  phenotypes_grouped = select_first([precomputed_phenotypes_grouped, PrepVcfs.phenotypes_grouped])
 
+    ## ── Step 2: flatten phenotypes_grouped into parallel (sv_index, phenotype) arrays,
+    ## so RunSusie below can scatter once instead of nesting a scatter per SV.
+    call FlattenPhenotypes {
+        input:
+            phenotypes_grouped = phenotypes_grouped,
+            docker             = docker
+    }
+
     if (defined(precomputed_merged_pgens_list)) {
         Array[File] precomputed_merged_pgens = read_lines(select_first([precomputed_merged_pgens_list]))
         Array[File] precomputed_merged_pvars = read_lines(select_first([precomputed_merged_pvars_list]))
@@ -117,7 +132,7 @@ workflow susieR_finemap_prep {
 
     Boolean skip_prep_merged_pgen = defined(precomputed_merged_pgens_list)
 
-    ## ── Step 2–4: outer scatter per unique SV, inner scatter per phecode ──────
+    ## ── Step 3: outer scatter per unique SV — builds/reuses that SV's merged pgen ──────
     scatter (i in range(length(vcf_files))) {
         File   sv_gt_vcf = vcf_files[i]
         String sv_id     = basename(sv_gt_vcf, "_GT.vcf")
@@ -143,33 +158,37 @@ workflow susieR_finemap_prep {
         File   this_merged_psam = if skip_prep_merged_pgen then select_first([precomputed_merged_psams])[i] else select_first([PrepMergedPgen.merged_psam])
         ## precomputed pgens are assumed good (they came from an already-successful prior run)
         String this_prep_status = if skip_prep_merged_pgen then "OK" else select_first([PrepMergedPgen.prep_status])
+    }
 
-        scatter (phenotype in phenotypes_grouped[i]) {
-            call RunSusie {
-                input:
-                    sv_id          = sv_id,
-                    phenotype      = phenotype,
-                    merged_pgen    = this_merged_pgen,
-                    merged_pvar    = this_merged_pvar,
-                    merged_psam    = this_merged_psam,
-                    prep_status    = this_prep_status,
-                    phenotype_file = phenotype_file,
-                    covariate_file = covariate_file,
-                    covar_names        = covar_names,
-                    min_case_carriers  = min_case_carriers,
-                    susie_L            = susie_L,
-                    susie_coverage     = susie_coverage,
-                    susie_script       = susie_script,
-                    cpu                = cpu,
-                    memory_gb          = memory_gb,
-                    docker             = docker,
-                    disk_gb            = disk_gb,
-                    preemptible       = preemptible
-            }
+    ## ── Step 4: single flat scatter per (sv, phecode) pair — no nested scatter.
+    ## flat_sv_index[j] looks back into the per-SV arrays built above for that pair's pgen.
+    scatter (j in range(length(FlattenPhenotypes.flat_phenotype))) {
+        Int idx = FlattenPhenotypes.flat_sv_index[j]
+
+        call RunSusie {
+            input:
+                sv_id          = sv_id[idx],
+                phenotype      = FlattenPhenotypes.flat_phenotype[j],
+                merged_pgen    = this_merged_pgen[idx],
+                merged_pvar    = this_merged_pvar[idx],
+                merged_psam    = this_merged_psam[idx],
+                prep_status    = this_prep_status[idx],
+                phenotype_file = phenotype_file,
+                covariate_file = covariate_file,
+                covar_names        = covar_names,
+                min_case_carriers  = min_case_carriers,
+                susie_L            = susie_L,
+                susie_coverage     = susie_coverage,
+                susie_script       = susie_script,
+                cpu                = cpu,
+                memory_gb          = memory_gb,
+                docker             = docker,
+                disk_gb            = disk_gb,
+                preemptible       = preemptible
         }
     }
 
-    Array[File] susie_out_flat = flatten(RunSusie.susie_out)
+    Array[File] susie_out_flat = RunSusie.susie_out
 
     ## ── Step 5: gather every susie result into one output directory ──────────
     call MergeSusieResults {
@@ -246,6 +265,52 @@ PYEOF
     output {
         Array[File]           vcf_files          = glob("*_GT.vcf")
         Array[Array[String]]  phenotypes_grouped = read_json("phenotypes_grouped.json")
+    }
+
+    runtime {
+        docker:      docker
+        cpu:         cpu
+        memory:      "~{memory_gb} GB"
+        disks:       "local-disk ~{disk_gb} SSD"
+        preemptible: preemptible
+    }
+}
+
+# ---------------------------------------------------------------------------
+task FlattenPhenotypes {
+    input {
+        Array[Array[String]] phenotypes_grouped
+        String                docker
+        Int                   cpu         = 1
+        Int                   memory_gb   = 4
+        Int                   disk_gb     = 20
+        Int                   preemptible = 1
+    }
+
+    command <<<
+        set -euo pipefail
+
+        python3 <<'PYEOF'
+import json
+
+with open("~{write_json(phenotypes_grouped)}") as f:
+    groups = json.load(f)
+
+flat_sv_index = []
+with open("flat_phenotype.txt", "w") as pheno_fh:
+    for i, phenos in enumerate(groups):
+        for p in phenos:
+            flat_sv_index.append(i)
+            pheno_fh.write(p + "\n")
+
+with open("flat_sv_index.json", "w") as idx_fh:
+    json.dump(flat_sv_index, idx_fh)
+PYEOF
+    >>>
+
+    output {
+        Array[Int]    flat_sv_index  = read_json("flat_sv_index.json")
+        Array[String] flat_phenotype = read_lines("flat_phenotype.txt")
     }
 
     runtime {
