@@ -17,20 +17,21 @@ version 1.0
 workflow susieR_finemap_prep {
     input {
         ## Pre-computed per-SV VCFs — if provided, PrepVcfs is skipped entirely.
-        ## precomputed_vcf_files must be parallel to precomputed_phenotypes_grouped_file,
-        ## a JSON array of arrays (one inner array of phecodes per VCF), e.g.
-        ## [["T2D","Obesity"],["Asthma"]].
-        Array[File]? precomputed_vcf_files
-        File?        precomputed_phenotypes_grouped_file
+        ## A text file with one VCF path per line, parallel (same order) to the phecode
+        ## groupings in precomputed_phenotypes_grouped_file, a JSON array of arrays (one
+        ## inner array of phecodes per VCF), e.g. [["T2D","Obesity"],["Asthma"]].
+        File? precomputed_vcf_files_list
+        File? precomputed_phenotypes_grouped_file
 
         ## Pre-built merged pgen/pvar/psam per SV — if provided, PrepMergedPgen (including its
-        ## GCS SNP fetch) is skipped entirely for every SV. Must be parallel arrays, one entry
-        ## per SV, in the same order as vcf_files/phenotypes_grouped (i.e. sorted by sv_id).
-        ## Useful to re-run RunSusie after a PrepMergedPgen shard was lost to preemption elsewhere
-        ## in the scatter, without re-paying for the GCS fetch on shards that already succeeded.
-        Array[File]? precomputed_merged_pgens
-        Array[File]? precomputed_merged_pvars
-        Array[File]? precomputed_merged_psams
+        ## GCS SNP fetch) is skipped entirely for every SV. Each is a text file with one path
+        ## per line, parallel to each other and to vcf_files/phenotypes_grouped (i.e. sorted
+        ## by sv_id). Useful to re-run RunSusie after a PrepMergedPgen shard was lost to
+        ## preemption elsewhere in the scatter, without re-paying for the GCS fetch on shards
+        ## that already succeeded.
+        File? precomputed_merged_pgens_list
+        File? precomputed_merged_pvars_list
+        File? precomputed_merged_psams_list
 
         ## PrepVcfs inputs — bonferroni_hits_tsv always required; others only needed
         ## when precomputed VCFs are not supplied
@@ -77,8 +78,12 @@ workflow susieR_finemap_prep {
         Int    preemptible = 1
     }
 
+    if (defined(precomputed_vcf_files_list)) {
+        Array[File] precomputed_vcf_files = read_lines(select_first([precomputed_vcf_files_list]))
+    }
+
     ## ── Step 1: split geno TSV into per-SV VCFs (skipped if precomputed supplied) ──
-    if (!defined(precomputed_vcf_files)) {
+    if (!defined(precomputed_vcf_files_list)) {
         call PrepVcfs {
             input:
                 bonferroni_hits_tsv         = select_first([bonferroni_hits_tsv]),
@@ -101,7 +106,13 @@ workflow susieR_finemap_prep {
     Array[File]           vcf_files          = select_first([precomputed_vcf_files,          PrepVcfs.vcf_files])
     Array[Array[String]]  phenotypes_grouped = select_first([precomputed_phenotypes_grouped, PrepVcfs.phenotypes_grouped])
 
-    Boolean skip_prep_merged_pgen = defined(precomputed_merged_pgens)
+    if (defined(precomputed_merged_pgens_list)) {
+        Array[File] precomputed_merged_pgens = read_lines(select_first([precomputed_merged_pgens_list]))
+        Array[File] precomputed_merged_pvars = read_lines(select_first([precomputed_merged_pvars_list]))
+        Array[File] precomputed_merged_psams = read_lines(select_first([precomputed_merged_psams_list]))
+    }
+
+    Boolean skip_prep_merged_pgen = defined(precomputed_merged_pgens_list)
 
     ## ── Step 2–4: outer scatter per unique SV, inner scatter per phecode ──────
     scatter (i in range(length(vcf_files))) {
