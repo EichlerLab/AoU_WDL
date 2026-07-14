@@ -80,12 +80,17 @@ workflow susieR_finemap_prep {
         Int    prep_memory_gb   = 32
         Int    prep_disk_gb     = 50
         Int    prep_preemptible = 1
+        ## Retries on ANY call failure (preemption/VM recreation included) — the Batch
+        ## backend doesn't reliably classify every preemption-related exit as
+        ## "preemptible retry eligible", so this is a blanket retry-on-failure net.
+        Int    prep_max_retries = 1
 
         Int    cpu         = 8
         Int    memory_gb   = 85
         String docker      = "eichlerlab/plink-phewas:0.2"
         Int    disk_gb     = 50
         Int    preemptible = 1
+        Int    max_retries = 1
     }
 
     if (defined(precomputed_vcf_files_list)) {
@@ -105,7 +110,8 @@ workflow susieR_finemap_prep {
                 memory_gb                   = prep_memory_gb,
                 docker                      = docker,
                 disk_gb                     = prep_disk_gb,
-                preemptible                 = prep_preemptible
+                preemptible                 = prep_preemptible,
+                max_retries                 = prep_max_retries
         }
     }
 
@@ -149,7 +155,8 @@ workflow susieR_finemap_prep {
                     memory_gb      = memory_gb,
                     docker         = docker,
                     disk_gb        = disk_gb,
-                    preemptible    = preemptible
+                    preemptible    = preemptible,
+                    max_retries    = max_retries
             }
         }
 
@@ -184,7 +191,8 @@ workflow susieR_finemap_prep {
                 memory_gb          = memory_gb,
                 docker             = docker,
                 disk_gb            = disk_gb,
-                preemptible       = preemptible
+                preemptible       = preemptible,
+                max_retries        = max_retries
         }
     }
 
@@ -220,6 +228,7 @@ task PrepVcfs {
         String docker
         Int    disk_gb
         Int    preemptible
+        Int    max_retries
     }
 
     command <<<
@@ -273,6 +282,7 @@ PYEOF
         memory:      "~{memory_gb} GB"
         disks:       "local-disk ~{disk_gb} SSD"
         preemptible: preemptible
+        maxRetries:  max_retries
     }
 }
 
@@ -285,6 +295,7 @@ task FlattenPhenotypes {
         Int                   memory_gb   = 4
         Int                   disk_gb     = 20
         Int                   preemptible = 1
+        Int                   max_retries = 1
     }
 
     command <<<
@@ -319,6 +330,7 @@ PYEOF
         memory:      "~{memory_gb} GB"
         disks:       "local-disk ~{disk_gb} SSD"
         preemptible: preemptible
+        maxRetries:  max_retries
     }
 }
 
@@ -335,6 +347,7 @@ task PrepMergedPgen {
         String docker
         Int    disk_gb
         Int    preemptible
+        Int    max_retries
     }
 
     command <<<
@@ -445,6 +458,7 @@ task PrepMergedPgen {
         memory:      "~{memory_gb} GB"
         disks:       "local-disk ~{disk_gb} SSD"
         preemptible: preemptible
+        maxRetries:  max_retries
     }
 }
 
@@ -469,6 +483,7 @@ task RunSusie {
         String docker
         Int    disk_gb
         Int    preemptible
+        Int    max_retries
     }
 
     command <<<
@@ -511,6 +526,7 @@ task RunSusie {
         memory:      "~{memory_gb} GB"
         disks:       "local-disk ~{disk_gb} SSD"
         preemptible: preemptible
+        maxRetries:  max_retries
     }
 }
 
@@ -523,6 +539,7 @@ task MergeSusieResults {
         Int         memory_gb   = 4
         Int         disk_gb     = 20
         Int         preemptible = 1
+        Int         max_retries = 1
     }
 
     command <<<
@@ -547,5 +564,6 @@ task MergeSusieResults {
         memory:      "~{memory_gb} GB"
         disks:       "local-disk ~{disk_gb} SSD"
         preemptible: preemptible
+        maxRetries:  max_retries
     }
 }
