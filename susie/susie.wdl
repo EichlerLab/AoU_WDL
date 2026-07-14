@@ -40,6 +40,9 @@ workflow susieR_finemap_prep {
         File? prep_vcfs_script
         File? relatedness_flagged_samples
 
+        ## susieR fine-mapping script run by RunSusie
+        File susie_script
+
         ## Phenotype + covariate tables
         File phenotype_file
         File covariate_file
@@ -135,9 +138,11 @@ workflow susieR_finemap_prep {
             }
         }
 
-        File this_merged_pgen = if skip_prep_merged_pgen then select_first([precomputed_merged_pgens])[i] else select_first([PrepMergedPgen.merged_pgen])
-        File this_merged_pvar = if skip_prep_merged_pgen then select_first([precomputed_merged_pvars])[i] else select_first([PrepMergedPgen.merged_pvar])
-        File this_merged_psam = if skip_prep_merged_pgen then select_first([precomputed_merged_psams])[i] else select_first([PrepMergedPgen.merged_psam])
+        File   this_merged_pgen = if skip_prep_merged_pgen then select_first([precomputed_merged_pgens])[i] else select_first([PrepMergedPgen.merged_pgen])
+        File   this_merged_pvar = if skip_prep_merged_pgen then select_first([precomputed_merged_pvars])[i] else select_first([PrepMergedPgen.merged_pvar])
+        File   this_merged_psam = if skip_prep_merged_pgen then select_first([precomputed_merged_psams])[i] else select_first([PrepMergedPgen.merged_psam])
+        ## precomputed pgens are assumed good (they came from an already-successful prior run)
+        String this_prep_status = if skip_prep_merged_pgen then "OK" else select_first([PrepMergedPgen.prep_status])
 
         scatter (phenotype in phenotypes_grouped[i]) {
             call RunSusie {
@@ -147,12 +152,14 @@ workflow susieR_finemap_prep {
                     merged_pgen    = this_merged_pgen,
                     merged_pvar    = this_merged_pvar,
                     merged_psam    = this_merged_psam,
+                    prep_status    = this_prep_status,
                     phenotype_file = phenotype_file,
                     covariate_file = covariate_file,
                     covar_names        = covar_names,
                     min_case_carriers  = min_case_carriers,
                     susie_L            = susie_L,
                     susie_coverage     = susie_coverage,
+                    susie_script       = susie_script,
                     cpu                = cpu,
                     memory_gb          = memory_gb,
                     docker             = docker,
@@ -266,84 +273,105 @@ task PrepMergedPgen {
     }
 
     command <<<
-        set -euo pipefail
+        set -uo pipefail
 
         sv="~{sv_id}"
 
         export GCS_REQUESTER_PAYS_PROJECT="~{google_project}"
 
-        ## Extract sample list from VCF header for bcftools -S
-        bcftools query -l "~{sv_gt_vcf}" > "${sv}_samples.txt"
+        ## The actual prep pipeline runs in a subshell so a failure anywhere inside (GCS
+        ## flakiness exhausting retries, a malformed region, plink2 choking on a locus, etc.)
+        ## can be caught below instead of failing this call outright — a hard call failure
+        ## here would (per Cromwell's NoNewCalls/array-aggregation semantics) block RunSusie
+        ## from ever running for ANY SV, not just this one.
+        if (
+            set -euo pipefail
 
-        ## Parse chrom / start / type / len from sv_id (chrN-POS-TYPE-LEN)
-        IFS="-" read -ra _parts <<< "$sv"
-        chrom="${_parts[0]}"
-        pos="${_parts[1]}"
-        sv_type="${_parts[2]}"
-        sv_len="${_parts[3]}"
-        start=$(( pos - ~{flank_bp} ))
-        if [[ "$sv_type" == "DEL" ]]; then
-            end=$(( pos + sv_len + ~{flank_bp} ))
+            ## Extract sample list from VCF header for bcftools -S
+            bcftools query -l "~{sv_gt_vcf}" > "${sv}_samples.txt"
+
+            ## Parse chrom / start / type / len from sv_id (chrN-POS-TYPE-LEN)
+            IFS="-" read -ra _parts <<< "$sv"
+            chrom="${_parts[0]}"
+            pos="${_parts[1]}"
+            sv_type="${_parts[2]}"
+            sv_len="${_parts[3]}"
+            start=$(( pos - ~{flank_bp} ))
+            if [[ "$sv_type" == "DEL" ]]; then
+                end=$(( pos + sv_len + ~{flank_bp} ))
+            else
+                end=$(( pos + ~{flank_bp} ))
+            fi
+            region="${chrom}:${start}-${end}"
+
+            ## 1. Fetch + filter flanking SNPs from GCS phased VCF
+            snp_vcf_path="gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/phasing/${chrom}_AOU_v8.2_allsamples_phased.vcf.gz"
+
+            ## bcftools' GCS reads occasionally fail mid-stream with a libcurl
+            ## HTTP/2 framing error (curl error 92). Retry with new token
+            fetch_snps() {
+                export GCS_OAUTH_TOKEN=$(gcloud auth print-access-token)
+                bcftools view --threads ~{cpu} -r "$region" -S "${sv}_samples.txt" "$snp_vcf_path" \
+                    | bcftools norm --threads ~{cpu} -m - \
+                    | bcftools view --threads ~{cpu} -m2 -M2 -v snps \
+                    | bcftools annotate --set-id +'%CHROM\_%POS\_%REF\_%FIRST_ALT' \
+                    | bcftools filter -i "AC > ~{min_ac}" \
+                    -Oz -o "${sv}_SNP.vcf.gz"
+            }
+
+            max_attempts=5
+            for attempt in $(seq 1 "$max_attempts"); do
+                if fetch_snps; then
+                    break
+                fi
+                if [[ "$attempt" -eq "$max_attempts" ]]; then
+                    echo "GCS fetch failed after ${max_attempts} attempts" >&2
+                    exit 1
+                fi
+                echo "GCS fetch attempt ${attempt} failed, retrying in 10s..." >&2
+                sleep 10
+            done
+            bcftools index --threads ~{cpu} -t "${sv}_SNP.vcf.gz"
+
+            ## 2. SNP summary table (MAF / AC)
+            bcftools +fill-tags "${sv}_SNP.vcf.gz" \
+                | bcftools query -f "%ID\t%INFO/MAF\t%INFO/AC\n" \
+                > "${sv}_SNP.tsv"
+
+            ## 3. Bgzip + index SV GT VCF
+            bgzip -@ ~{cpu} -c "~{sv_gt_vcf}" > "${sv}_GT.vcf.gz"
+            tabix -p vcf "${sv}_GT.vcf.gz"
+
+            ## 4. Merge SV + flanking SNPs → single pgen for association and susieR
+            bcftools concat -a "${sv}_GT.vcf.gz" "${sv}_SNP.vcf.gz" -Ou \
+                | bcftools sort -Oz -o "${sv}_merged.vcf.gz"
+            tabix -p vcf "${sv}_merged.vcf.gz"
+
+            plink2 --vcf "${sv}_merged.vcf.gz" --make-pgen --out "${sv}_merged"
+
+            ## 5. Unphased pairwise LD (r^2) across the merged SV + flanking-SNP set
+            plink2 --pfile "${sv}_merged" --r2-unphased --ld-window-r2 0 --out "${sv}_ld"
+        ); then
+            echo "OK" > "${sv}_prep_status.txt"
         else
-            end=$(( pos + ~{flank_bp} ))
+            echo "PrepMergedPgen FAILED for SV=${sv} — writing placeholder outputs so the" \
+                 "rest of the workflow (RunSusie, MergeSusieResults) still runs to completion" >&2
+            echo "FAILED" > "${sv}_prep_status.txt"
+            [[ -f "${sv}_SNP.tsv"     ]] || : > "${sv}_SNP.tsv"
+            [[ -f "${sv}_merged.pgen" ]] || : > "${sv}_merged.pgen"
+            [[ -f "${sv}_merged.pvar" ]] || : > "${sv}_merged.pvar"
+            [[ -f "${sv}_merged.psam" ]] || : > "${sv}_merged.psam"
+            [[ -f "${sv}_ld.vcor"     ]] || : > "${sv}_ld.vcor"
         fi
-        region="${chrom}:${start}-${end}"
-
-        ## 1. Fetch + filter flanking SNPs from GCS phased VCF
-        snp_vcf_path="gs://vwb-aou-datasets-controlled/v8/wgs/short_read/snpindel/aux/phasing/${chrom}_AOU_v8.2_allsamples_phased.vcf.gz"
-
-        ## bcftools' GCS reads occasionally fail mid-stream with a libcurl
-        ## HTTP/2 framing error (curl error 92). Retry with new token
-        fetch_snps() {
-            export GCS_OAUTH_TOKEN=$(gcloud auth print-access-token)
-            bcftools view --threads ~{cpu} -r "$region" -S "${sv}_samples.txt" "$snp_vcf_path" \
-                | bcftools norm --threads ~{cpu} -m - \
-                | bcftools view --threads ~{cpu} -m2 -M2 -v snps \
-                | bcftools annotate --set-id +'%CHROM\_%POS\_%REF\_%FIRST_ALT' \
-                | bcftools filter -i "AC > ~{min_ac}" \
-                -Oz -o "${sv}_SNP.vcf.gz"
-        }
-
-        max_attempts=5
-        for attempt in $(seq 1 "$max_attempts"); do
-            if fetch_snps; then
-                break
-            fi
-            if [[ "$attempt" -eq "$max_attempts" ]]; then
-                echo "GCS fetch failed after ${max_attempts} attempts" >&2
-                exit 1
-            fi
-            echo "GCS fetch attempt ${attempt} failed, retrying in 10s..." >&2
-            sleep 10
-        done
-        bcftools index --threads ~{cpu} -t "${sv}_SNP.vcf.gz"
-
-        ## 2. SNP summary table (MAF / AC)
-        bcftools +fill-tags "${sv}_SNP.vcf.gz" \
-            | bcftools query -f "%ID\t%INFO/MAF\t%INFO/AC\n" \
-            > "${sv}_SNP.tsv"
-
-        ## 3. Bgzip + index SV GT VCF
-        bgzip -@ ~{cpu} -c "~{sv_gt_vcf}" > "${sv}_GT.vcf.gz"
-        tabix -p vcf "${sv}_GT.vcf.gz"
-
-        ## 4. Merge SV + flanking SNPs → single pgen for association and susieR
-        bcftools concat -a "${sv}_GT.vcf.gz" "${sv}_SNP.vcf.gz" -Ou \
-            | bcftools sort -Oz -o "${sv}_merged.vcf.gz"
-        tabix -p vcf "${sv}_merged.vcf.gz"
-
-        plink2 --vcf "${sv}_merged.vcf.gz" --make-pgen --out "${sv}_merged"
-
-        ## 5. Unphased pairwise LD (r^2) across the merged SV + flanking-SNP set
-        plink2 --pfile "${sv}_merged" --r2-unphased --ld-window-r2 0 --out "${sv}_ld"
     >>>
 
     output {
-        File snp_tsv     = "~{sv_id}_SNP.tsv"
-        File merged_pgen = "~{sv_id}_merged.pgen"
-        File merged_pvar = "~{sv_id}_merged.pvar"
-        File merged_psam = "~{sv_id}_merged.psam"
-        File merged_ld   = "~{sv_id}_ld.vcor"
+        File   snp_tsv     = "~{sv_id}_SNP.tsv"
+        File   merged_pgen = "~{sv_id}_merged.pgen"
+        File   merged_pvar = "~{sv_id}_merged.pvar"
+        File   merged_psam = "~{sv_id}_merged.psam"
+        File   merged_ld   = "~{sv_id}_ld.vcor"
+        String prep_status = read_string("~{sv_id}_prep_status.txt")
     }
 
     runtime {
@@ -363,12 +391,14 @@ task RunSusie {
         File   merged_pgen
         File   merged_pvar
         File   merged_psam
+        String prep_status
         File   phenotype_file
         File   covariate_file
         String covar_names = "age,SEX,principal_component_1,principal_component_2,principal_component_3,principal_component_4,principal_component_5,principal_component_6,principal_component_7,principal_component_8,principal_component_9,principal_component_10"
         Int    min_case_carriers
         Int    susie_L
         Float  susie_coverage
+        File   susie_script
         Int    cpu
         Int    memory_gb
         String docker
@@ -379,138 +409,31 @@ task RunSusie {
     command <<<
         set -euo pipefail
 
-        ln -sf "~{merged_pgen}" merged.pgen
-        ln -sf "~{merged_pvar}" merged.pvar
-        ln -sf "~{merged_psam}" merged.psam
+        out="~{sv_id}_~{phenotype}_susie.tsv"
 
-        Rscript - <<'REOF'
-        library(pgenlibr)
-        library(susieR)
+        ## PrepMergedPgen already failed for this SV (see its comment for why that can't be
+        ## allowed to fail the whole workflow) — don't spend a susie-sized VM confirming it.
+        if [[ "~{prep_status}" != "OK" ]]; then
+            echo "Skipping susie for ~{sv_id}/~{phenotype}: upstream PrepMergedPgen failed" >&2
+            printf "SV\tPhenotype\tStatus\n~{sv_id}\t~{phenotype}\tUPSTREAM_PREP_FAILED\n" > "$out"
+            exit 0
+        fi
 
-        sv        <- "~{sv_id}"
-        phecode   <- "~{phenotype}"
-        covar_vec <- strsplit("~{covar_names}", ",")[[1]]
-
-        ## ── 1. Read genotypes from merged pgen (SV + flanking SNPs) ──────────
-        pvar        <- NewPvar("merged.pvar")
-        pgen        <- NewPgen("merged.pgen", pvar = pvar)
-        n_variants  <- GetVariantCt(pvar)
-        variant_ids <- sapply(seq_len(n_variants), function(i) GetVariantId(pvar, i))
-        X_full      <- ReadList(pgen, variant_subset = seq_len(n_variants), meanimpute = TRUE)
-        colnames(X_full) <- variant_ids
-
-        ## plink2 files use a leading '#' comment char on the header line —
-        ## read.table's defaults (comment.char = "#", check.names = TRUE)
-        ## mangle it, so read manually and strip the '#'.
-        read_plink_table <- function(path) {
-            df <- read.table(path, header = TRUE, sep = "\t",
-                             comment.char = "", check.names = FALSE)
-            colnames(df)[1] <- sub("^#", "", colnames(df)[1])
-            df
-        }
-
-        psam       <- read_plink_table("merged.psam")
-        sample_ids <- as.character(psam$IID)
-
-        ## ── 2. Merge phenotype + covariates, align to pgen sample order ───────
-        pheno_dat <- read_plink_table("~{phenotype_file}")
-        covar_dat <- read_plink_table("~{covariate_file}")
-
-        missing_cols <- setdiff(c("IID", phecode), colnames(pheno_dat))
-        if (length(missing_cols) > 0) {
-            stop(sprintf(
-                "phenotype_file is missing expected column(s): %s\nphecode requested: [%s]\ncolumns found: %s",
-                paste(missing_cols, collapse = ", "),
-                phecode,
-                paste(sprintf("[%s]", colnames(pheno_dat)), collapse = ", ")
-            ))
-        }
-
-        pheno_sub <- pheno_dat[, c("IID", phecode)]
-        dat       <- merge(pheno_sub, covar_dat, by = "IID")
-        dat       <- dat[!is.na(dat[[phecode]]), ]
-
-        ## phecode columns use the standard 1 = control / 2 = case coding —
-        ## recode to 0/1 for glm(family = binomial).
-        dat[[phecode]] <- dat[[phecode]] - 1
-
-        ## Restrict to samples that actually have genotype data before indexing,
-        ## otherwise unmatched IIDs introduce NA rows into X.
-        dat <- dat[dat$IID %in% sample_ids, ]
-
-        row_idx <- match(dat$IID, sample_ids)
-        X_raw   <- X_full[row_idx, , drop = FALSE]
-
-        ## ── 3. Drop variants with too few case carriers, or with no variance
-        ## in this subset (susie's scale() would turn those into NaN columns).
-        case_status      <- dat[[phecode]]
-        is_carrier_full  <- round(X_raw) >= 1
-        n_case_with_full <- colSums(is_carrier_full[case_status == 1, , drop = FALSE], na.rm = TRUE)
-        has_variance     <- apply(X_raw, 2, function(col) length(unique(col[!is.na(col)])) > 1)
-        keep             <- (n_case_with_full >= ~{min_case_carriers}) & has_variance
-
-        message(sprintf(
-            "dropping %d/%d variant(s): %d with fewer than %d case carrier(s), %d monomorphic in this subset: %s",
-            sum(!keep), length(keep),
-            sum(n_case_with_full < ~{min_case_carriers}), ~{min_case_carriers},
-            sum(!has_variance), paste(variant_ids[!has_variance], collapse = ", ")
-        ))
-
-        variant_ids <- variant_ids[keep]
-        X_raw       <- X_raw[, keep, drop = FALSE]
-        n_variants  <- length(variant_ids)
-        X           <- scale(X_raw)
-
-        ## ── 4. Null model residuals ───────────────────────────────────────────
-        null_formula <- as.formula(paste(phecode, "~", paste(covar_vec, collapse = " + ")))
-        null <- glm(null_formula, family = binomial, data = dat)
-        y    <- residuals(null, type = "response")
-
-        ## ── 5. Run susie ──────────────────────────────────────────────────────
-        fit <- susie(X, y, L = ~{susie_L}, coverage = ~{susie_coverage})
-
-        message(sprintf(
-            "susie found %d credible set(s); target SV '%s' %s in variant_ids (n_variants=%d, max_pip=%.4g)",
-            length(fit$sets$cs), sv,
-            ifelse(sv %in% variant_ids, "IS present", "is NOT present"),
-            n_variants, max(fit$pip)
-        ))
-
-        ## CS: credible set number a variant belongs to (NA if none).
-        ## Lead_in_CS: TRUE for the highest-PIP variant within its own credible set.
-        cs_membership <- rep(NA_integer_, n_variants)
-        lead_in_cs    <- rep(FALSE, n_variants)
-        for (j in seq_along(fit$sets$cs)) {
-            idx <- fit$sets$cs[[j]]
-            cs_membership[idx] <- j
-            lead_in_cs[idx[which.max(fit$pip[idx])]] <- TRUE
-        }
-
-        ## Per-variant case/control counts by carrier status (>= 1 copy of the
-        ## alt allele, rounding the mean-imputed dosage to the nearest hard call).
-        is_carrier        <- round(X_raw) >= 1
-        n_case_with       <- colSums(is_carrier[case_status == 1, , drop = FALSE])
-        n_case_without    <- colSums(!is_carrier[case_status == 1, , drop = FALSE])
-        n_control_with    <- colSums(is_carrier[case_status == 0, , drop = FALSE])
-        n_control_without <- colSums(!is_carrier[case_status == 0, , drop = FALSE])
-
-        final_df <- data.frame(
-            Variant           = variant_ids,
-            PIP               = fit$pip,
-            CS                = cs_membership,
-            Lead_in_CS        = lead_in_cs,
-            Cases_W_Var       = n_case_with,
-            Cases_WO_Var    = n_case_without,
-            Ctrls_W_Var    = n_control_with,
-            Ctrls_WO_Var = n_control_without,
-            stringsAsFactors = FALSE
-        )
-        final_df <- final_df[order(-final_df$PIP), ]
-
-        ## Phenotype suffix keeps filenames unique when an SV has more than one phenotype.
-        write.table(final_df, paste0(sv, "_", phecode, "_susie.tsv"),
-                    sep = "\t", quote = FALSE, row.names = FALSE)
-        REOF
+        ## run_susie.R catches its own errors internally and always writes $out (with a
+        ## SUSIE_ERROR marker on failure), so no error handling is needed here.
+        Rscript ~{susie_script} \
+            --sv_id "~{sv_id}" \
+            --phecode "~{phenotype}" \
+            --pgen ~{merged_pgen} \
+            --pvar ~{merged_pvar} \
+            --psam ~{merged_psam} \
+            --phenotype_file ~{phenotype_file} \
+            --covariate_file ~{covariate_file} \
+            --covar_names "~{covar_names}" \
+            --min_case_carriers ~{min_case_carriers} \
+            --susie_L ~{susie_L} \
+            --susie_coverage ~{susie_coverage} \
+            --out "$out"
     >>>
 
     output {
