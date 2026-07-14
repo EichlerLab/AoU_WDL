@@ -23,6 +23,15 @@ workflow susieR_finemap_prep {
         Array[File]? precomputed_vcf_files
         File?        precomputed_phenotypes_grouped_file
 
+        ## Pre-built merged pgen/pvar/psam per SV — if provided, PrepMergedPgen (including its
+        ## GCS SNP fetch) is skipped entirely for every SV. Must be parallel arrays, one entry
+        ## per SV, in the same order as vcf_files/phenotypes_grouped (i.e. sorted by sv_id).
+        ## Useful to re-run RunSusie after a PrepMergedPgen shard was lost to preemption elsewhere
+        ## in the scatter, without re-paying for the GCS fetch on shards that already succeeded.
+        Array[File]? precomputed_merged_pgens
+        Array[File]? precomputed_merged_pvars
+        Array[File]? precomputed_merged_psams
+
         ## PrepVcfs inputs — bonferroni_hits_tsv always required; others only needed
         ## when precomputed VCFs are not supplied
         File  bonferroni_hits_tsv
@@ -92,33 +101,41 @@ workflow susieR_finemap_prep {
     Array[File]           vcf_files          = select_first([precomputed_vcf_files,          PrepVcfs.vcf_files])
     Array[Array[String]]  phenotypes_grouped = select_first([precomputed_phenotypes_grouped, PrepVcfs.phenotypes_grouped])
 
+    Boolean skip_prep_merged_pgen = defined(precomputed_merged_pgens)
+
     ## ── Step 2–4: outer scatter per unique SV, inner scatter per phecode ──────
     scatter (i in range(length(vcf_files))) {
         File   sv_gt_vcf = vcf_files[i]
         String sv_id     = basename(sv_gt_vcf, "_GT.vcf")
 
-        call PrepMergedPgen {
-            input:
-                sv_id          = sv_id,
-                sv_gt_vcf      = sv_gt_vcf,
-                google_project = google_project,
-                flank_bp       = flank_bp,
-                min_ac         = min_ac,
-                cpu            = cpu,
-                memory_gb      = memory_gb,
-                docker         = docker,
-                disk_gb        = disk_gb,
-                preemptible    = preemptible
+        if (!skip_prep_merged_pgen) {
+            call PrepMergedPgen {
+                input:
+                    sv_id          = sv_id,
+                    sv_gt_vcf      = sv_gt_vcf,
+                    google_project = google_project,
+                    flank_bp       = flank_bp,
+                    min_ac         = min_ac,
+                    cpu            = cpu,
+                    memory_gb      = memory_gb,
+                    docker         = docker,
+                    disk_gb        = disk_gb,
+                    preemptible    = preemptible
+            }
         }
+
+        File this_merged_pgen = if skip_prep_merged_pgen then select_first([precomputed_merged_pgens])[i] else select_first([PrepMergedPgen.merged_pgen])
+        File this_merged_pvar = if skip_prep_merged_pgen then select_first([precomputed_merged_pvars])[i] else select_first([PrepMergedPgen.merged_pvar])
+        File this_merged_psam = if skip_prep_merged_pgen then select_first([precomputed_merged_psams])[i] else select_first([PrepMergedPgen.merged_psam])
 
         scatter (phenotype in phenotypes_grouped[i]) {
             call RunSusie {
                 input:
                     sv_id          = sv_id,
                     phenotype      = phenotype,
-                    merged_pgen    = PrepMergedPgen.merged_pgen,
-                    merged_pvar    = PrepMergedPgen.merged_pvar,
-                    merged_psam    = PrepMergedPgen.merged_psam,
+                    merged_pgen    = this_merged_pgen,
+                    merged_pvar    = this_merged_pvar,
+                    merged_psam    = this_merged_psam,
                     phenotype_file = phenotype_file,
                     covariate_file = covariate_file,
                     covar_names        = covar_names,
@@ -144,8 +161,10 @@ workflow susieR_finemap_prep {
     }
 
     output {
-        Array[File] snp_tsv          = PrepMergedPgen.snp_tsv
-        Array[File] ld_files         = PrepMergedPgen.merged_ld
+        ## Empty when precomputed_merged_pgens is supplied (PrepMergedPgen skipped, so no new
+        ## snp_tsv/LD files are produced — the caller already has them from the prior run).
+        Array[File] snp_tsv          = select_all(PrepMergedPgen.snp_tsv)
+        Array[File] ld_files         = select_all(PrepMergedPgen.merged_ld)
         Array[File] susie_out        = susie_out_flat
         File        susie_merged_dir = MergeSusieResults.merged_dir
     }
