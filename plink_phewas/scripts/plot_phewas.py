@@ -4,7 +4,7 @@ Generate a PheWAS Manhattan plot from a PheTK-ready results TSV.
 Labels all points passing Bonferroni correction (0.05 / n_tests).
 """
 import argparse
-
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 from phetk.plot import Plot
@@ -26,6 +26,9 @@ def parse_args():
                    help="Number of top associations to label when --label-only-bonferroni is not set")
     p.add_argument("--min-case-carrier-ct", type=int, default=5,
                    help="Minimum CASE_HET_A1_CT + CASE_HOM_A1_CT to include in plot")
+    p.add_argument("--min-carrier-ct-above-bonferroni-only", action="store_true",
+                   help="Apply --min-case-carrier-ct only to points passing the Bonferroni "
+                        "threshold; points below the threshold are not filtered by carrier count")
     return p.parse_args()
 
 
@@ -33,6 +36,15 @@ def main():
     args = parse_args()
 
     import os
+
+    mpl.rcParams.update(
+        {
+            'text.usetex': False, 
+            'svg.fonttype': 'none', 
+            'font.family': 'sans-serif', 
+            'font.sans-serif': 'Arial'
+        }
+    )
     sv_id = os.path.basename(args.phewas_results)
     sv_id = sv_id[:sv_id.rindex('.')] # strip ext
 
@@ -64,9 +76,14 @@ def main():
     bonferroni_threshold = 0.05 / n_tests if n_tests > 0 else 0.05
 
     # Points shown in plot also require sufficient alt-allele cases
-    df_plot = df_all[
-        (df_all["CASE_HET_A1_CT"] + df_all["CASE_HOM_A1_CT"]) >= args.min_case_carrier_ct
-    ].copy()
+    carrier_ct = df_all["CASE_HET_A1_CT"] + df_all["CASE_HOM_A1_CT"]
+    if args.min_carrier_ct_above_bonferroni_only:
+        # No carrier-count filter below the Bonferroni threshold (min 0); only
+        # significant points must meet --min-case-carrier-ct
+        passes_bonferroni = df_all["p_value"] < bonferroni_threshold
+        df_plot = df_all[~passes_bonferroni | (carrier_ct >= args.min_case_carrier_ct)].copy()
+    else:
+        df_plot = df_all[carrier_ct >= args.min_case_carrier_ct].copy()
 
     # Annotate labels with OR and case/control carrier counts
     def fmt_label(row):
@@ -106,11 +123,16 @@ def main():
     phewas_plot = Plot("phewas_results_for_plot.tsv", bonferroni=neg_log_bonferroni)
     phewas_plot.manhattan(
         title=title,
+	title_text_size=14,
         label_values=label_values,
         label_count=label_count,
         y_limit=y_limit,
         output_file_path=output,
         save_plot=True,
+        label_size=12,
+	axis_text_size=13,
+	show_legend=False,
+	#label_split_threshold=10
     )
     print(f"Manhattan plot written to {output}", flush=True)
 
