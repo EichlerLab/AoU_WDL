@@ -76,7 +76,7 @@ task GenerateDBFromVCF {
     String output_tar = "vcf_db.tar.gz"
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         nthreads=$(nproc)
         echo "using ${nthreads} threads"
@@ -118,7 +118,7 @@ task GunzipReference {
     Int disk_size_gb = 1 + 4*ceil(size(ref_gz, "GiB"))
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         gunzip -c ~{ref_gz} > reference.fa
         samtools faidx reference.fa
@@ -172,7 +172,7 @@ task LocityperPreprocessAndGenotype {
     String output_tar = sample_id + ".locityper.tar.gz"
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
         date
         mv ~{reference} reference.fa
         mv ~{reference_index} reference.fa.fai
@@ -188,8 +188,7 @@ task LocityperPreprocessAndGenotype {
         MAX_RETRIES=~{max_retry}
         CURR_RETRIES=0
         WAIT_TIME=~{wait_time}
-        until (( CURR_RETRIES == MAX_RETRIES )) || samtools view -h -T reference.fa  --verbosity 10  --regions-file extended.bed -C -o subset.cram -X ~{cram} full.cram.crai ; do
-            echo "error: waiting: " $WAIT_TIME
+        until (( CURR_RETRIES == MAX_RETRIES )) || samtools view -h -T reference.fa  --regions-file extended.bed -C -o subset.cram -X ~{cram} full.cram.crai  >/dev/null 2>&1 ; do
             sleep $WAIT_TIME
             echo $(( CURR_RETRIES++ ))
         done
@@ -206,7 +205,7 @@ task LocityperPreprocessAndGenotype {
             -j ~{counts_file} \
             -@ ~{locityper_n_cpu} \
             --technology illumina \
-            -o locityper_preproc
+            -o locityper_preproc  >/dev/null 2>&1
 
         tar -xzf ~{db_targz}
         
@@ -216,9 +215,7 @@ task LocityperPreprocessAndGenotype {
 
         process_single_locus() {
             line="$1"
-            locus_name=$(echo "$line" | cut -f4)
-            echo "Processing locus: ${locus_name}"
-            
+            locus_name=$(echo "$line" | cut -f4)       
             # Ensure the locus-specific directory exists
             mkdir -p "out_dir/loci/${locus_name}"
             
@@ -227,9 +224,8 @@ task LocityperPreprocessAndGenotype {
                 -d vcf_db \
                 -p locityper_preproc \
                 --subset-loci "${locus_name}" \
-                -o out_dir
+                -o out_dir  >/dev/null 2>&1
             
-            echo "Done Processing locus: ${locus_name}"
         }
         export -f process_single_locus
 
@@ -267,7 +263,7 @@ task SplitBedNames {
     Int disk_size = 1 + ceil(size(bed, "GiB"))
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         cut -f4 ~{bed} | split -l ~{N} - split_part_ && wc -l split_part_*
     >>>
@@ -295,10 +291,10 @@ task SubsetBed {
     Int disk_size = 1 + ceil(size([bed, sample_map], "GiB"))
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         grep '^~{sample_id}' ~{sample_map} | cut -f2 | sed 's/,/\n/g' > loci.txt
-        cat loci.txt
+        #cat loci.txt
         grep -f loci.txt ~{bed} > subset.bed
     >>>
 
@@ -324,7 +320,7 @@ task SplitBed {
     Int disk_size = 1 + ceil(size(bed, "GiB"))
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         cat ~{bed} | split -l ~{N} - split_part_ && wc -l split_part_*
     >>>
@@ -351,7 +347,7 @@ task FilterNames {
     Int disk_size = 1 + 2*ceil(size([bed], "GiB"))
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         grep -v -f ~{write_lines(names_to_remove)} ~{bed} | cut -f4 > filtered.txt
     >>>
@@ -378,7 +374,7 @@ task FilterBed {
     Int disk_size = 1 + 2*ceil(size([locus_names], "GiB"))
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         grep -f ~{locus_names} ~{bed} > filtered.bed
     >>>
@@ -406,23 +402,23 @@ task CombineTarFiles {
     String combined_tar = sample_id + ".combined.tar.gz"
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         # Create a temporary directory to extract all tar files
         mkdir -p combined_temp
         
         # Extract all tar files into the temporary directory
         for tar_file in ~{sep=" " tar_files}; do
-            echo "Extracting $tar_file"
+            #echo "Extracting $tar_file"
             tar -xzf "$tar_file" -C combined_temp
         done
         
         # Create a new combined tar file from the extracted contents
-        echo "Creating combined tar file: ~{combined_tar}"
+        #echo "Creating combined tar file: ~{combined_tar}"
         tar -czf ~{combined_tar} -C combined_temp .
         
-        echo "Combined tar file created successfully"
-        ls -lh ~{combined_tar}
+        #echo "Combined tar file created successfully"
+        #ls -lh ~{combined_tar}
         
         # Clean up
         rm -rf combined_temp
@@ -450,7 +446,7 @@ task Summarize {
     Int disk_size = 1 + 10*ceil(size(genotype_tar, "GiB"))
 
     command <<<
-        set -euxo pipefail
+        set -euo pipefail
 
         tar -xzvf ~{genotype_tar}
 
@@ -459,7 +455,7 @@ task Summarize {
         # Remove subdirectories that don't have res.json.gz
         for dir in ~{sample_id}/loci/*/; do
             if [ ! -f "${dir}/res.json.gz" ]; then
-                echo "Removing directory ${dir} - no res.json.gz found"
+                #echo "Removing directory ${dir} - no res.json.gz found"
                 rm -rf "${dir}"
             fi
         done
