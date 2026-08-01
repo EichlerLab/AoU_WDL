@@ -123,19 +123,20 @@ def main():
     phewas_plot = Plot("phewas_results_for_plot.tsv", bonferroni=neg_log_bonferroni)
     phewas_plot.manhattan(
         title=title,
-	title_text_size=14,
+        title_text_size=14,
         label_values=label_values,
         label_count=label_count,
         y_limit=y_limit,
         output_file_path=output,
         save_plot=True,
         label_size=12,
-	axis_text_size=13,
-	show_legend=False,
-	#label_split_threshold=10
+        axis_text_size=13,
+        show_legend=False,
+        label_split_threshold=14
     )
     print(f"Manhattan plot written to {output}", flush=True)
 
 
 if __name__ == "__main__":
     main()
+

@@ -45,15 +45,15 @@ workflow PhewasAcrossSVs {
     String docker = "eichlerlab/plink-phewas:0.1"
 
     # ── Runtime overrides ────────────────────────────────────────────────────
-    Int prep_memory_gb   = 32
-    Int prep_cpu         = 1
+    Int prep_memory_gb   = 64
+    Int prep_cpu         = 2
     Int prep_disk_gb     = 50
-    Int prep_preemptible = 1
+    Int prep_preemptible = 0
 
     Int phewas_memory_gb   = 16
     Int phewas_cpu         = 4
     Int phewas_disk_gb     = 30
-    Int phewas_preemptible = 2
+    Int phewas_preemptible = 1
   }
 
   # ── Step 1: create all per-SV VCFs (single task) ──────────────────────────
@@ -249,6 +249,7 @@ task RunPhewasPerSv {
         --output         "${sv}_manhattan.png" \
         ~{if defined(sv_info) then "--sv-info " + sv_info else ""} \
         --manhattan-label-count  ~{manhattan_label_count} \
+        --min-carrier-ct-above-bonferroni-only \
         ~{if label_only_bonferroni then "--label-only-bonferroni" else ""}
     }
 
