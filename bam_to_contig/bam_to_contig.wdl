@@ -83,10 +83,10 @@ task RunBamToContig {
     #########################
     RuntimeAttr default_attr = object {
       cpu_cores:          1,
-      mem_gb:             8,
-      disk_gb:            10,
-      boot_disk_gb:       10,
-      preemptible_tries:  1,
+      mem_gb:             1,
+      disk_gb:            40,
+      boot_disk_gb:       40,
+      preemptible_tries:  2,
       max_retries:        0,
       docker: "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
     }
@@ -122,10 +122,10 @@ task RunFaidx {
     #########################
     RuntimeAttr default_attr = object {
       cpu_cores:          1,
-      mem_gb:             8,
+      mem_gb:             1,
       disk_gb:            10,
       boot_disk_gb:       10,
-      preemptible_tries:  1,
+      preemptible_tries:  2,
       max_retries:        0,
       docker: "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
     }
@@ -159,10 +159,10 @@ task ConcatContigs {
     #########################
     RuntimeAttr default_attr = object {
       cpu_cores:          1,
-      mem_gb:             8,
+      mem_gb:             1,
       disk_gb:            10,
       boot_disk_gb:       10,
-      preemptible_tries:  1,
+      preemptible_tries:  2,
       max_retries:        0,
       docker: "us.gcr.io/broad-dsp-lrma/lr-talon:5.0"
     }
