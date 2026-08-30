@@ -83,7 +83,7 @@ task RunBamToContig {
     #########################
     RuntimeAttr default_attr = object {
       cpu_cores:          1,
-      mem_gb:             1,
+      mem_gb:             2,
       disk_gb:            40,
       boot_disk_gb:       40,
       preemptible_tries:  2,
