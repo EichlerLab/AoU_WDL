@@ -95,8 +95,12 @@ def main():
             v = row.get(col)
             return int(v) if pd.notna(v) else 0
         cases = ct("CASE_HET_A1_CT") + ct("CASE_HOM_A1_CT") + ct("CASE_NON_A1_CT")
+        cases_w_var = ct("CASE_HET_A1_CT") + ct("CASE_HOM_A1_CT")
+        cases_wo_var = ct("CASE_NON_A1_CT")
         controls = ct("CTRL_HET_A1_CT") + ct("CTRL_HOM_A1_CT") + ct("CTRL_NON_A1_CT")
-        return f"{row['phecode_string']} ({or_val}, cases={cases}, controls={controls})"
+        controls_w_var =  ct("CTRL_HET_A1_CT") + ct("CTRL_HOM_A1_CT")
+        controls_wo_var = ct("CTRL_NON_A1_CT")
+        return f"{row['phecode_string']}, {or_val}\nCases={cases:,} ({cases_w_var:,} w/ SV, {cases_wo_var:,} w/o SV)\nControls={controls:,} ({controls_w_var:,} w/ SV, {controls_wo_var:,} w/o SV)"
 
     df_plot["phecode_string"] = df_plot.apply(fmt_label, axis=1)
 
@@ -132,7 +136,7 @@ def main():
         label_size=12,
         axis_text_size=13,
         show_legend=False,
-        label_split_threshold=14
+        label_split_threshold=200
     )
     print(f"Manhattan plot written to {output}", flush=True)
 

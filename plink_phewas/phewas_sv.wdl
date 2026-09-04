@@ -70,6 +70,7 @@ workflow PhewasAcrossSVs {
       cpu                         = prep_cpu,
       disk_gb                     = prep_disk_gb,
       preemptible                 = prep_preemptible,
+      max_retries                 = 1
   }
 
   # ── Step 2: plink2 PheWAS + plotting, one shard per SV ────────────────────
