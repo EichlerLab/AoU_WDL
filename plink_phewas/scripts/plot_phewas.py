@@ -70,6 +70,12 @@ def main():
 
     df = pd.read_csv(args.phewas_results, sep="\t")
 
+    # Ignore phenotypes with a failed/non-converged model
+    if "ERRCODE" in df.columns:
+        df = df[df["ERRCODE"].isna() | (df["ERRCODE"] == ".")]
+    if "converged" in df.columns:
+        df = df[df["converged"] == True]
+
     # Bonferroni uses all phenotypes with a valid category (before carrier filter)
     df_all = df.dropna(subset=["phecode_category"])
     n_tests = len(df_all)
