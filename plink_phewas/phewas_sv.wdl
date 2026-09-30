@@ -69,8 +69,7 @@ workflow PhewasAcrossSVs {
       memory_gb                   = prep_memory_gb,
       cpu                         = prep_cpu,
       disk_gb                     = prep_disk_gb,
-      preemptible                 = prep_preemptible,
-      max_retries                 = 1
+      preemptible                 = prep_preemptible
   }
 
   # ── Step 2: plink2 PheWAS + plotting, one shard per SV ────────────────────
@@ -155,7 +154,7 @@ task PrepVcfs {
     cpu:         cpu
     disks:       "local-disk ~{disk_gb} SSD"
     preemptible: preemptible
-    maxRetries:  preemptible
+    maxRetries:  1
   }
 }
 
@@ -270,7 +269,7 @@ task RunPhewasPerSv {
     cpu:         cpu
     disks:       "local-disk ~{disk_gb} HDD"
     preemptible: preemptible
-    maxRetries:  preemptible
+    maxRetries:  1
   }
 }
 
@@ -314,6 +313,6 @@ task GatherOutputs {
     cpu:         1
     disks:       "local-disk ~{disk_gb} HDD"
     preemptible: preemptible
-    maxRetries:  preemptible
+    maxRetries:  1
   }
 }
